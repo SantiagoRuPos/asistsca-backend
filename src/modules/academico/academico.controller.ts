@@ -3,6 +3,7 @@ import { AcademicoService } from './academico.service';
 import { CrearProfesorDto } from './dto/crear-profesor.dto';
 import { CrearCursoDto } from './dto/crear-curso.dto';
 import { CambiarDirectorCursoDto } from './dto/cambiar-director-curso.dto';
+import { CrearHorarioCursoDto } from './dto/crear-horario-curso.dto';
 import { CrearEstudianteDto } from './dto/crear-estudiante.dto';
 import { CrearAcudienteDto } from './dto/crear-acudiente.dto';
 import { MatricularEstudianteDto } from './dto/matricular-estudiante.dto';
@@ -33,7 +34,7 @@ export class AcademicoController {
     return this.academicoService.crearCurso(dto);
   }
 
-  @Get('Listar-cursos')
+  @Get('cursos')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(...ROLES_LECTURA)
   listarCursos() {
@@ -45,6 +46,21 @@ export class AcademicoController {
   @Roles(...ROLES_GESTION)
   cambiarDirector(@Param('id', ParseUUIDPipe) id: string, @Body() dto: CambiarDirectorCursoDto) {
     return this.academicoService.cambiarDirectorCurso(id, dto);
+  }
+
+  @Post('cursos/:id/horarios')
+  @HttpCode(HttpStatus.CREATED)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ROLES_GESTION)
+  crearHorario(@Param('id', ParseUUIDPipe) id: string, @Body() dto: CrearHorarioCursoDto) {
+    return this.academicoService.crearHorarioCurso(id, dto);
+  }
+
+  @Get('cursos/:id/horarios')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ROLES_LECTURA)
+  listarHorarios(@Param('id', ParseUUIDPipe) id: string) {
+    return this.academicoService.listarHorariosCurso(id);
   }
 
   @Post('estudiantes')

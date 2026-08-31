@@ -7,6 +7,7 @@ import * as bcrypt from 'bcrypt';
 
 import { Profesor } from '../../config/entities/academico/profesor.entity';
 import { Curso, Jornada } from '../../config/entities/academico/curso.entity';
+import { HorarioCurso } from '../../config/entities/academico/horario-curso.entity';
 import { Estudiante } from '../../config/entities/academico/estudiante.entity';
 import { Acudiente } from '../../config/entities/academico/acudiente.entity';
 import { EstudianteAcudiente } from '../../config/entities/academico/estudiante-acudiente.entity';
@@ -18,6 +19,7 @@ import { Estado, CategoriaEstado } from '../../config/entities/catalogos/estado.
 import { CrearProfesorDto } from './dto/crear-profesor.dto';
 import { CrearCursoDto } from './dto/crear-curso.dto';
 import { CambiarDirectorCursoDto } from './dto/cambiar-director-curso.dto';
+import { CrearHorarioCursoDto } from './dto/crear-horario-curso.dto';
 import { CrearEstudianteDto } from './dto/crear-estudiante.dto';
 import { CrearAcudienteDto } from './dto/crear-acudiente.dto';
 import { MatricularEstudianteDto } from './dto/matricular-estudiante.dto';
@@ -28,6 +30,7 @@ export class AcademicoService {
   constructor(
     @InjectRepository(Profesor) private readonly profesorRepository: Repository<Profesor>,
     @InjectRepository(Curso) private readonly cursoRepository: Repository<Curso>,
+    @InjectRepository(HorarioCurso) private readonly horarioCursoRepository: Repository<HorarioCurso>,
     @InjectRepository(Estudiante) private readonly estudianteRepository: Repository<Estudiante>,
     @InjectRepository(Acudiente) private readonly acudienteRepository: Repository<Acudiente>,
     @InjectRepository(EstudianteAcudiente)
@@ -140,7 +143,7 @@ export class AcademicoService {
 
   async listarCursos() {
     const cursos = await this.cursoRepository.find({
-      relations: ['profesorDirector', 'matriculas'],
+      relations: ['profesorDirector', 'matriculas', 'horarios'],
       order: { anioLectivo: 'DESC', nombre: 'ASC' },
     });
 
@@ -156,6 +159,14 @@ export class AcademicoService {
       },
       tieneEstudiantes: curso.matriculas.length > 0,
       cantidadEstudiantes: curso.matriculas.length,
+      horarios: curso.horarios
+        .sort((a, b) => a.diaSemana - b.diaSemana)
+        .map((h) => ({
+          diaSemana: h.diaSemana,
+          horaEntrada: h.horaEntrada,
+          horaSalida: h.horaSalida,
+          minutosToleranciaTardanza: h.minutosToleranciaTardanza,
+        })),
     }));
   }
 
@@ -179,6 +190,52 @@ export class AcademicoService {
 
     curso.profesorDirector = nuevoProfesor;
     return this.cursoRepository.save(curso);
+  }
+
+  // ---------- Horarios ----------
+
+  async crearHorarioCurso(cursoId: string, dto: CrearHorarioCursoDto) {
+    const curso = await this.cursoRepository.findOne({ where: { id: cursoId } });
+    if (!curso) {
+      throw new NotFoundException('El curso indicado no existe.');
+    }
+
+    const existentes = await this.horarioCursoRepository.find({ where: { cursoId: curso.id } });
+    const diasYaConfigurados = new Set(existentes.map((h) => h.diaSemana));
+
+    const diasNuevos = dto.diasSemana.filter((dia) => !diasYaConfigurados.has(dia));
+    const diasOmitidos = dto.diasSemana.filter((dia) => diasYaConfigurados.has(dia));
+
+    const horarios = diasNuevos.map((dia) =>
+      this.horarioCursoRepository.create({
+        curso,
+        diaSemana: dia,
+        horaEntrada: dto.horaEntrada,
+        minutosToleranciaTardanza: dto.minutosToleranciaTardanza ?? 0,
+        horaSalida: dto.horaSalida,
+      }),
+    );
+
+    const guardados = await this.horarioCursoRepository.save(horarios);
+
+    return {
+      creados: guardados,
+      omitidos: diasOmitidos.length
+        ? `Los días ${diasOmitidos.join(', ')} ya tenían horario configurado, no se tocaron.`
+        : undefined,
+    };
+  }
+
+  async listarHorariosCurso(cursoId: string) {
+    const curso = await this.cursoRepository.findOne({ where: { id: cursoId } });
+    if (!curso) {
+      throw new NotFoundException('El curso indicado no existe.');
+    }
+
+    return this.horarioCursoRepository.find({
+      where: { cursoId: curso.id },
+      order: { diaSemana: 'ASC' },
+    });
   }
 
   // ---------- Estudiantes ----------
@@ -210,15 +267,15 @@ export class AcademicoService {
     return this.estudianteRepository.save(estudiante);
   }
 
-async crearAcudiente(dto: CrearAcudienteDto) {
-  const acudiente = this.acudienteRepository.create({
-    nombres: dto.nombre.trim(),
-    apellidos: dto.apellidos.trim(),
-    parentesco: dto.parentesco,
-    telefonoWhatsapp: dto.telefonoWhatsapp.trim(),
-    email: dto.email?.trim() ?? null,
-    numeroDocumento: dto.numeroDocumento?.trim() ?? null,
-  });
+  async crearAcudiente(dto: CrearAcudienteDto) {
+    const acudiente = this.acudienteRepository.create({
+      nombres: dto.nombre.trim(),
+      apellidos: dto.apellidos.trim(),
+      parentesco: dto.parentesco,
+      telefonoWhatsapp: dto.telefonoWhatsapp.trim(),
+      email: dto.email?.trim() ?? null,
+      numeroDocumento: dto.numeroDocumento?.trim() ?? null,
+    });
     const acudienteGuardado = await this.acudienteRepository.save(acudiente);
 
     if (dto.estudianteId) {
