@@ -5,6 +5,7 @@ import { AsignarTarjetaDto } from './dto/asignar-tarjeta.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { Auditar } from '../../common/decorators/auditar.decorator';
 
 @Controller('nfc')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -14,6 +15,7 @@ export class NfcController {
   @Post('lectores')
   @HttpCode(HttpStatus.CREATED)
   @Roles('admin')
+  @Auditar('crear_lector', 'lector_nfc')
   crearLector(@Body() dto: CrearLectorDto) {
     return this.nfcService.crearLector(dto);
   }
@@ -27,6 +29,7 @@ export class NfcController {
   @Post('tarjetas')
   @HttpCode(HttpStatus.CREATED)
   @Roles('admin', 'coordinador')
+  @Auditar('asignar_tarjeta', 'tarjeta_nfc')
   asignarTarjeta(@Body() dto: AsignarTarjetaDto) {
     return this.nfcService.asignarTarjeta(dto);
   }

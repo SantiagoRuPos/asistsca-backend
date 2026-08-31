@@ -4,6 +4,7 @@ import { CrearExcusaDto } from './dto/crear-excusa.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { Auditar } from '../../common/decorators/auditar.decorator';
 
 const ROLES_GESTION = ['admin', 'rector', 'coordinador'];
 
@@ -26,12 +27,14 @@ export class ExcusasController {
 
   @Patch(':id/aprobar')
   @Roles(...ROLES_GESTION)
+  @Auditar('aprobar_excusa', 'excusa')
   aprobar(@Param('id') id: string, @Req() request: any) {
     return this.excusasService.aprobar(id, request.usuario.sub);
   }
 
   @Patch(':id/rechazar')
   @Roles(...ROLES_GESTION)
+  @Auditar('rechazar_excusa', 'excusa')
   rechazar(@Param('id') id: string, @Req() request: any) {
     return this.excusasService.rechazar(id, request.usuario.sub);
   }

@@ -13,6 +13,8 @@ import { AuthModule } from './modules/auth/auth.module';
 import { NfcModule } from './modules/nfc/nfc.module';
 import { AsistenciaModule } from './modules/asistencia/asistencia.module';
 import { ComunicacionesModule } from './modules/comunicaciones/comunicaciones.module';
+import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
+import { AuditoriaModule } from './modules/auditoria/auditoria.module';
 
 @Module({
   imports: [
@@ -41,6 +43,8 @@ import { ComunicacionesModule } from './modules/comunicaciones/comunicaciones.mo
     NfcModule,
     AsistenciaModule,
     ComunicacionesModule,
+    WhatsappModule,
+    AuditoriaModule,
   ],
   providers: [
     {

@@ -26,6 +26,9 @@ export interface AppConfig {
     loginTtlMs: number;
     loginLimit: number;
   };
+  whatsapp: {
+    encryptionKey: string;
+  };
   corsOrigins: string[];
 }
 
@@ -58,6 +61,10 @@ export default (): AppConfig => ({
     loginTtlMs: parseInt(process.env.LOGIN_THROTTLE_TTL_MS ?? '60000', 10),
     loginLimit: parseInt(process.env.LOGIN_THROTTLE_LIMIT ?? '5', 10),
   },
+  whatsapp: {
+    encryptionKey: process.env.WHATSAPP_ENCRYPTION_KEY!,
+  },
+
   corsOrigins: (process.env.CORS_ORIGINS ?? '')
     .split(',')
     .map((origin) => origin.trim())

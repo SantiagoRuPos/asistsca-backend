@@ -9,6 +9,7 @@ import { Matricula } from '../../config/entities/academico/matricula.entity';
 import { HorarioCurso } from '../../config/entities/academico/horario-curso.entity';
 import { Estado, CategoriaEstado } from '../../config/entities/catalogos/estado.entity';
 import { RegistrarEventoDto } from './dto/registrar-evento.dto';
+import { WhatsappService } from '../whatsapp/whatsapp.service';
 
 @Injectable()
 export class AsistenciaService {
@@ -19,6 +20,7 @@ export class AsistenciaService {
     @InjectRepository(Matricula) private readonly matriculaRepository: Repository<Matricula>,
     @InjectRepository(HorarioCurso) private readonly horarioCursoRepository: Repository<HorarioCurso>,
     @InjectRepository(Estado) private readonly estadoRepository: Repository<Estado>,
+    private readonly whatsappService: WhatsappService,
   ) {}
 
   async registrarEvento(dto: RegistrarEventoDto, lector: LectorNfc) {
@@ -55,6 +57,7 @@ export class AsistenciaService {
     let asistencia: AsistenciaDiaria | null = null;
     if (tarjeta.tipoTitular === TipoTitular.ESTUDIANTE && tarjeta.estudianteId) {
       asistencia = await this.actualizarAsistenciaDiaria(tarjeta.estudianteId, eventoGuardado);
+      void this.whatsappService.notificarEvento(tarjeta.estudianteId, eventoGuardado);
     }
 
     return {
@@ -87,9 +90,6 @@ export class AsistenciaService {
       relations: ['curso'],
     });
 
-    // Sin matrícula no hay curso, y sin curso no hay horario contra qué comparar —
-    // igual se guarda el evento crudo (ya quedó en eventos_asistencia), pero no se
-    // puede calcular presente/tarde sin saber a qué horario pertenece.
     if (!matricula) {
       return null;
     }
@@ -117,7 +117,7 @@ export class AsistenciaService {
         where: { categoria: CategoriaEstado.ASISTENCIA_DIARIA, codigo: codigoEstado },
       });
       if (!estado) {
-        return null; // falta el seed — no rompemos el registro del evento por esto
+        return null;
       }
 
       if (!existente) {
@@ -132,9 +132,7 @@ export class AsistenciaService {
       return this.asistenciaDiariaRepository.save(existente);
     }
 
-    // tipoEvento === SALIDA
     if (!existente) {
-      // Salida sin entrada registrada el mismo día (caso raro) — se deja constancia igual.
       const estadoPresente = await this.estadoRepository.findOne({
         where: { categoria: CategoriaEstado.ASISTENCIA_DIARIA, codigo: 'presente' },
       });

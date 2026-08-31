@@ -4,6 +4,7 @@ import { CrearColegioDto } from './dto/crear-colegio.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { Auditar } from '../../common/decorators/auditar.decorator';
 
 @Controller('colegio')
 export class ColegioController {
@@ -12,6 +13,7 @@ export class ColegioController {
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
+  @Auditar('crear_colegio', 'colegio')
   crear(@Body() dto: CrearColegioDto) {
     return this.colegioService.crear(dto);
   }

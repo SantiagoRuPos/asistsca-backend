@@ -3,17 +3,23 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AsistenciaController } from './asistencia.controller';
 import { AsistenciaConsultaController } from './asistencia-consulta.controller';
 import { ExcusasController } from './excusas.controller';
+import { AutorizacionesSalidaController } from './autorizaciones-salida.controller';
 import { AsistenciaService } from './asistencia.service';
 import { ExcusasService } from './excusas.service';
+import { AutorizacionesSalidaService } from './autorizaciones-salida.service';
 import { EventoAsistencia } from '../../config/entities/nfc/evento-asistencia.entity';
 import { TarjetaNfc } from '../../config/entities/nfc/tarjeta-nfc.entity';
 import { LectorNfc } from '../../config/entities/nfc/lector-nfc.entity';
 import { AsistenciaDiaria } from '../../config/entities/asistencia/asistencia-diaria.entity';
 import { Excusa } from '../../config/entities/asistencia/excusa.entity';
+import { AutorizacionSalida } from '../../config/entities/asistencia/autorizacion-salida.entity';
 import { Matricula } from '../../config/entities/academico/matricula.entity';
 import { HorarioCurso } from '../../config/entities/academico/horario-curso.entity';
 import { Estudiante } from '../../config/entities/academico/estudiante.entity';
+import { Acudiente } from '../../config/entities/academico/acudiente.entity';
+import { Usuario } from '../../config/entities/usuarios/usuario.entity';
 import { Estado } from '../../config/entities/catalogos/estado.entity';
+import { WhatsappModule } from '../whatsapp/whatsapp.module';
 
 @Module({
   imports: [
@@ -23,13 +29,22 @@ import { Estado } from '../../config/entities/catalogos/estado.entity';
       LectorNfc,
       AsistenciaDiaria,
       Excusa,
+      AutorizacionSalida,
       Matricula,
       HorarioCurso,
       Estudiante,
+      Acudiente,
+      Usuario,
       Estado,
     ]),
+    WhatsappModule,
   ],
-  controllers: [AsistenciaController, AsistenciaConsultaController, ExcusasController],
-  providers: [AsistenciaService, ExcusasService],
+  controllers: [
+    AsistenciaController,
+    AsistenciaConsultaController,
+    ExcusasController,
+    AutorizacionesSalidaController,
+  ],
+  providers: [AsistenciaService, ExcusasService, AutorizacionesSalidaService],
 })
 export class AsistenciaModule {}
