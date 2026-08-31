@@ -1,4 +1,19 @@
-import { Controller } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
+import { UsuariosService } from './usuarios.service';
+import { CrearUsuarioDto } from './dto/crear-usuario.dto';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 @Controller('usuarios')
-export class UsuariosController {}
+export class UsuariosController {
+  constructor(private readonly usuariosService: UsuariosService) {}
+
+  @Post('registro-usuarios')
+  @HttpCode(HttpStatus.CREATED)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  crear(@Body() dto: CrearUsuarioDto) {
+    return this.usuariosService.crear(dto);
+  }
+}

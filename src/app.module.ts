@@ -5,7 +5,6 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import configuration, { AppConfig } from './config/configuration';
 import { validateEnv } from './config/env.validation';
 import { DatabaseModule } from './config/database/database.module';
-import { ColegioController } from './modules/colegio/colegio.controller';
 import { ColegioModule } from './modules/colegio/colegio.module';
 import { CatalogosModule } from './modules/catalogos/catalogos.module';
 import { AcademicoModule } from './modules/academico/academico.module';
@@ -42,8 +41,6 @@ import { ComunicacionesModule } from './modules/comunicaciones/comunicaciones.mo
     NfcModule,
     AsistenciaModule,
     ComunicacionesModule,
-    
-
   ],
   providers: [
     {
@@ -51,6 +48,5 @@ import { ComunicacionesModule } from './modules/comunicaciones/comunicaciones.mo
       useClass: ThrottlerGuard,
     },
   ],
-  controllers: [ColegioController],
 })
 export class AppModule {}
