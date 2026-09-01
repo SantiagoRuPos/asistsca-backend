@@ -79,6 +79,33 @@ class EnvironmentVariables {
 
   @IsNumberString()
   BCRYPT_SALT_ROUNDS!: string;
+
+  // --- SMTP (mailer) ---
+  // Opcionales: mientras SMTP_USER/SMTP_PASS no se completen manualmente,
+  // el mailer queda inactivo (ver mailer.service.ts) en vez de romper el arranque.
+  @IsOptional()
+  @IsString()
+  SMTP_HOST!: string;
+
+  @IsOptional()
+  @IsNumberString()
+  SMTP_PORT!: string;
+
+  @IsOptional()
+  @IsBooleanString()
+  SMTP_SECURE!: string;
+
+  @IsOptional()
+  @IsString()
+  SMTP_USER!: string;
+
+  @IsOptional()
+  @IsString()
+  SMTP_PASS!: string;
+
+  @IsOptional()
+  @IsString()
+  BRAND_NAME!: string;
 }
 
 export function validateEnv(config: Record<string, unknown>) {

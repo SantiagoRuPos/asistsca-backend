@@ -50,4 +50,7 @@ export class Excusa {
 
   @Column({ name: 'archivo_soporte_url', type: 'text', nullable: true })
   archivoSoporteUrl!: string | null;
+
+  @Column({ name: 'archivo_soporte_nombre', type: 'varchar', length: 255, nullable: true })
+  archivoSoporteNombre!: string | null;
 }

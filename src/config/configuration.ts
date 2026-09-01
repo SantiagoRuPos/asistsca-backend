@@ -29,6 +29,16 @@ export interface AppConfig {
   whatsapp: {
     encryptionKey: string;
   };
+  smtp: {
+    host: string | null;
+    port: number;
+    secure: boolean;
+    user: string | null;
+    pass: string | null;
+  };
+  brand: {
+    name: string;
+  };
   corsOrigins: string[];
 }
 
@@ -63,6 +73,19 @@ export default (): AppConfig => ({
   },
   whatsapp: {
     encryptionKey: process.env.WHATSAPP_ENCRYPTION_KEY!,
+  },
+
+  // SMTP_USER y SMTP_PASS quedan en null si no se han configurado todavia:
+  // el mailer detecta esto y evita enviar correos hasta que se completen.
+  smtp: {
+    host: process.env.SMTP_HOST ?? null,
+    port: parseInt(process.env.SMTP_PORT ?? '465', 10),
+    secure: (process.env.SMTP_SECURE ?? 'true') === 'true',
+    user: process.env.SMTP_USER || null,
+    pass: process.env.SMTP_PASS || null,
+  },
+  brand: {
+    name: process.env.BRAND_NAME ?? 'AsistSCA',
   },
 
   corsOrigins: (process.env.CORS_ORIGINS ?? '')

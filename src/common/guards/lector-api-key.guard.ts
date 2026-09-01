@@ -25,6 +25,9 @@ export class LectorApiKeyGuard implements CanActivate {
       throw new UnauthorizedException('API key de lector inválida');
     }
 
+    // No se espera esta actualización para no añadir latencia al flujo de ingesta NFC en tiempo real.
+    void this.lectorRepository.update(lector.id, { ultimaConexion: new Date() });
+
     request.lector = lector;
     return true;
   }

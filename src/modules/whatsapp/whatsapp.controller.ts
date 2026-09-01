@@ -17,6 +17,11 @@ export class WhatsappController {
     return this.whatsappConfigService.obtenerEnmascarada();
   }
 
+  @Get('probar')
+  probarConexion() {
+    return this.whatsappConfigService.probarConexion();
+  }
+
   @Put()
   @Auditar('actualizar_configuracion_whatsapp', 'configuracion_whatsapp')
   actualizar(@Body() dto: ConfigurarWhatsappDto, @Req() request: any) {

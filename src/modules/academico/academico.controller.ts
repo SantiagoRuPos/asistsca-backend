@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AcademicoService } from './academico.service';
 import { CrearProfesorDto } from './dto/crear-profesor.dto';
 import { CrearCursoDto } from './dto/crear-curso.dto';
@@ -7,6 +7,8 @@ import { CrearHorarioCursoDto } from './dto/crear-horario-curso.dto';
 import { CrearEstudianteDto } from './dto/crear-estudiante.dto';
 import { CrearAcudienteDto } from './dto/crear-acudiente.dto';
 import { MatricularEstudianteDto } from './dto/matricular-estudiante.dto';
+import { FiltrarEstudiantesDto } from './dto/filtrar-estudiantes.dto';
+import { RegistrarEstudianteCompletoDto } from './dto/registrar-estudiante-completo.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -71,6 +73,14 @@ export class AcademicoController {
     return this.academicoService.crearEstudiante(dto);
   }
 
+  @Post('estudiantes/completo')
+  @HttpCode(HttpStatus.CREATED)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ROLES_GESTION)
+  registrarEstudianteCompleto(@Body() dto: RegistrarEstudianteCompletoDto) {
+    return this.academicoService.registrarEstudianteCompleto(dto);
+  }
+
   @Post('acudientes')
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -87,11 +97,18 @@ export class AcademicoController {
     return this.academicoService.matricularEstudiante(dto);
   }
 
+  @Get('estudiantes/resumen')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ROLES_LECTURA)
+  obtenerResumenEstudiantes() {
+    return this.academicoService.obtenerResumenEstudiantes();
+  }
+
   @Get('estudiantes')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(...ROLES_LECTURA)
-  listarEstudiantes() {
-    return this.academicoService.listarEstudiantes();
+  listarEstudiantes(@Query() filtros: FiltrarEstudiantesDto) {
+    return this.academicoService.listarEstudiantes(filtros);
   }
 
   @Get('estudiantes/activos')

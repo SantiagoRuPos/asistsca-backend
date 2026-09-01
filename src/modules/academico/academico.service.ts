@@ -24,6 +24,8 @@ import { CrearEstudianteDto } from './dto/crear-estudiante.dto';
 import { CrearAcudienteDto } from './dto/crear-acudiente.dto';
 import { MatricularEstudianteDto } from './dto/matricular-estudiante.dto';
 import { EstudianteMasivoItemDto } from './dto/estudiante-masivo-item.dto';
+import { FiltrarEstudiantesDto } from './dto/filtrar-estudiantes.dto';
+import { RegistrarEstudianteCompletoDto } from './dto/registrar-estudiante-completo.dto';
 
 @Injectable()
 export class AcademicoService {
@@ -267,6 +269,79 @@ export class AcademicoService {
     return this.estudianteRepository.save(estudiante);
   }
 
+  async registrarEstudianteCompleto(dto: RegistrarEstudianteCompletoDto) {
+    const numeroDocumento = dto.estudiante.numeroDocumento.trim();
+
+    const duplicado = await this.estudianteRepository.findOne({ where: { numeroDocumento } });
+    if (duplicado) {
+      throw new ConflictException('Ya existe un estudiante con ese número de documento.');
+    }
+
+    const curso = await this.cursoRepository.findOne({ where: { id: dto.matricula.cursoId } });
+    if (!curso) {
+      throw new NotFoundException('El curso indicado no existe.');
+    }
+
+    const estadoEstudianteActivo = await this.estadoRepository.findOne({
+      where: { categoria: CategoriaEstado.ESTUDIANTE, codigo: 'activo' },
+    });
+    if (!estadoEstudianteActivo) {
+      throw new ConflictException('No existe el estado activo de estudiante en la tabla estados (falta el seed).');
+    }
+
+    const estadoMatriculaActiva = await this.estadoRepository.findOne({
+      where: { categoria: CategoriaEstado.MATRICULA, codigo: 'activa' },
+    });
+    if (!estadoMatriculaActiva) {
+      throw new ConflictException('No existe el estado "activa" de matrícula en la tabla estados (falta el seed).');
+    }
+
+    const anioLectivo = dto.matricula.anioLectivo ?? new Date().getFullYear();
+
+    return this.dataSource.transaction(async (manager) => {
+      const estudiante = manager.create(Estudiante, {
+        nombres: dto.estudiante.nombres.trim(),
+        apellidos: dto.estudiante.apellidos.trim(),
+        tipoDocumento: dto.estudiante.tipoDocumento.trim(),
+        numeroDocumento,
+        fechaNacimiento: dto.estudiante.fechaNacimiento,
+        estado: estadoEstudianteActivo,
+      });
+      const estudianteGuardado = await manager.save(estudiante);
+
+      const matricula = manager.create(Matricula, {
+        estudiante: estudianteGuardado,
+        curso,
+        anioLectivo,
+        estado: estadoMatriculaActiva,
+      });
+      const matriculaGuardada = await manager.save(matricula);
+
+      const acudiente = manager.create(Acudiente, {
+        nombres: dto.acudiente.nombres.trim(),
+        apellidos: dto.acudiente.apellidos.trim(),
+        parentesco: dto.acudiente.parentesco,
+        telefonoWhatsapp: dto.acudiente.telefonoWhatsapp.trim(),
+        email: dto.acudiente.email?.trim() ?? null,
+        numeroDocumento: dto.acudiente.numeroDocumento?.trim() ?? null,
+      });
+      const acudienteGuardado = await manager.save(acudiente);
+
+      const vinculo = manager.create(EstudianteAcudiente, {
+        estudianteId: estudianteGuardado.id,
+        acudienteId: acudienteGuardado.id,
+        esContactoNotificacion: true,
+      });
+      await manager.save(vinculo);
+
+      return {
+        estudiante: estudianteGuardado,
+        matricula: { id: matriculaGuardada.id, cursoId: curso.id, curso: curso.nombre, anioLectivo },
+        acudiente: acudienteGuardado,
+      };
+    });
+  }
+
   async crearAcudiente(dto: CrearAcudienteDto) {
     const acudiente = this.acudienteRepository.create({
       nombres: dto.nombre.trim(),
@@ -332,11 +407,92 @@ export class AcademicoService {
     return this.matriculaRepository.save(matricula);
   }
 
-  async listarEstudiantes() {
-    return this.estudianteRepository.find({
-      relations: ['estado'],
-      order: { apellidos: 'ASC', nombres: 'ASC' },
+  async obtenerResumenEstudiantes() {
+    const totalCursos = await this.cursoRepository.count();
+    const totalEstudiantes = await this.estudianteRepository.count();
+
+    const estadoActivo = await this.estadoRepository.findOne({
+      where: { categoria: CategoriaEstado.ESTUDIANTE, codigo: 'activo' },
     });
+    const activos = estadoActivo
+      ? await this.estudianteRepository.count({ where: { estadoId: estadoActivo.id } })
+      : 0;
+    const inactivos = totalEstudiantes - activos;
+
+    const porcentaje = (valor: number) => (totalEstudiantes > 0 ? Math.round((valor / totalEstudiantes) * 100) : 0);
+
+    return {
+      totalEstudiantes,
+      totalCursos,
+      activos: { valor: activos, porcentaje: porcentaje(activos) },
+      inactivos: { valor: inactivos, porcentaje: porcentaje(inactivos) },
+    };
+  }
+
+  async listarEstudiantes(filtros: FiltrarEstudiantesDto) {
+    const anioLectivo = new Date().getFullYear();
+    const pagina = filtros.pagina ?? 1;
+    const limite = filtros.limite ?? 10;
+
+    const qb = this.estudianteRepository
+      .createQueryBuilder('estudiante')
+      .leftJoinAndSelect('estudiante.estado', 'estado')
+      .leftJoinAndSelect('estudiante.matriculas', 'matricula', 'matricula.anioLectivo = :anioLectivo', { anioLectivo })
+      .leftJoinAndSelect('matricula.curso', 'curso')
+      .leftJoinAndSelect('estudiante.acudientes', 'estudianteAcudiente')
+      .leftJoinAndSelect('estudianteAcudiente.acudiente', 'acudiente');
+
+    if (filtros.q) {
+      qb.andWhere(
+        '(estudiante.nombres ILIKE :q OR estudiante.apellidos ILIKE :q OR estudiante.numeroDocumento ILIKE :q)',
+        { q: `%${filtros.q}%` },
+      );
+    }
+
+    if (filtros.cursoId) {
+      qb.andWhere('curso.id = :cursoId', { cursoId: filtros.cursoId });
+    }
+
+    if (filtros.estado) {
+      qb.andWhere('estado.codigo = :estadoCodigo', { estadoCodigo: filtros.estado });
+    }
+
+    qb.orderBy('estudiante.apellidos', 'ASC').addOrderBy('estudiante.nombres', 'ASC');
+    qb.skip((pagina - 1) * limite).take(limite);
+
+    const [estudiantes, total] = await qb.getManyAndCount();
+
+    const datos = estudiantes.map((estudiante) => {
+      const curso = estudiante.matriculas?.[0]?.curso ?? null;
+      const vinculoAcudiente =
+        estudiante.acudientes?.find((ea) => ea.esContactoNotificacion) ?? estudiante.acudientes?.[0] ?? null;
+
+      return {
+        id: estudiante.id,
+        nombres: estudiante.nombres,
+        apellidos: estudiante.apellidos,
+        tipoDocumento: estudiante.tipoDocumento,
+        numeroDocumento: estudiante.numeroDocumento,
+        fechaNacimiento: estudiante.fechaNacimiento,
+        estado: { codigo: estudiante.estado.codigo, nombre: estudiante.estado.nombre },
+        curso: curso ? { id: curso.id, nombre: curso.nombre } : null,
+        acudiente: vinculoAcudiente
+          ? {
+              nombres: vinculoAcudiente.acudiente.nombres,
+              apellidos: vinculoAcudiente.acudiente.apellidos,
+              telefonoWhatsapp: vinculoAcudiente.acudiente.telefonoWhatsapp,
+            }
+          : null,
+      };
+    });
+
+    return {
+      datos,
+      total,
+      pagina,
+      limite,
+      totalPaginas: Math.max(1, Math.ceil(total / limite)),
+    };
   }
 
   async listarEstudiantesActivos() {

@@ -26,6 +26,9 @@ export class Usuario {
   @Column({ name: 'nombre_completo', length: 200 })
   nombreCompleto!: string;
 
+  @Column({ name: 'telefono', type: 'varchar', length: 30, nullable: true })
+  telefono!: string | null;
+
   @Column({ name: 'rol_id' })
   rolId!: string;
 

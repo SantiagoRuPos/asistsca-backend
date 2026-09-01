@@ -37,8 +37,10 @@ export class NfcService {
     const apiKeyHash = createHash('sha256').update(apiKey).digest('hex');
 
     const lector = this.lectorRepository.create({
+      nombre: dto.nombre.trim(),
       codigoLector: dto.codigoLector.trim(),
       descripcionUbicacion: dto.descripcionUbicacion?.trim() ?? null,
+      descripcion: dto.descripcion?.trim() ?? null,
       apiKeyHash,
       estado: estadoActivo,
     });

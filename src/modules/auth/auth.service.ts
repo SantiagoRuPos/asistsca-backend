@@ -69,7 +69,12 @@ const usuario = await this.usuarioRepository.findOne({ where: { email }, relatio
       throw new UnauthorizedException('Refresh token inválido o expirado');
     }
 
-    const usuario = await this.usuarioRepository.findOne({ where: { id: payload.sub } });
+    // OJO: se necesita la relación 'rol' aquí porque emitirTokens() lee usuario.rol.nombre
+    // para armar el payload del access token. Sin `relations: ['rol']`, usuario.rol queda
+    // undefined y emitirTokens() explota con "Cannot read properties of undefined (reading 'nombre')"
+    // -- esto pasaba cada vez que el access token expiraba (cada 15 min) y el frontend
+    // intentaba renovarlo en silencio, cerrando la sesión aunque el refresh token fuera válido.
+    const usuario = await this.usuarioRepository.findOne({ where: { id: payload.sub }, relations: ['rol'] });
     if (!usuario) {
       throw new UnauthorizedException('Refresh token inválido o expirado');
     }

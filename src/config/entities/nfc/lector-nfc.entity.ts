@@ -24,12 +24,34 @@ export class LectorNfc {
   codigoLector!: string;
 
   @Column({
+    name: 'nombre',
+    type: 'varchar',
+    length: 120,
+    nullable: true,
+  })
+  nombre!: string | null;
+
+  @Column({
     name: 'descripcion_ubicacion',
     type: 'varchar',
     length: 200,
     nullable: true,
   })
   descripcionUbicacion!: string | null;
+
+  @Column({
+    name: 'descripcion',
+    type: 'text',
+    nullable: true,
+  })
+  descripcion!: string | null;
+
+  @Column({
+    name: 'ultima_conexion',
+    type: 'timestamp',
+    nullable: true,
+  })
+  ultimaConexion!: Date | null;
 
   @Exclude()
   @Column({

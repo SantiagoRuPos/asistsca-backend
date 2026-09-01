@@ -35,6 +35,34 @@ export class WhatsappConfigService {
     return configuracion ? this.enmascarar(configuracion) : null;
   }
 
+  async probarConexion(): Promise<{ exitoso: boolean; mensaje: string }> {
+    const configuracion = await this.obtenerParaEnvio();
+    if (!configuracion) {
+      return { exitoso: false, mensaje: 'No hay ninguna configuración de WhatsApp guardada todavía.' };
+    }
+
+    try {
+      const respuesta = await fetch(
+        `https://graph.facebook.com/${configuracion.apiVersion}/${configuracion.phoneNumberId}?fields=id`,
+        { headers: { Authorization: `Bearer ${configuracion.accessToken}` } },
+      );
+      const cuerpo = await respuesta.json().catch(() => null);
+
+      if (respuesta.ok) {
+        return { exitoso: true, mensaje: 'La conexión con WhatsApp Business API funciona correctamente.' };
+      }
+      return {
+        exitoso: false,
+        mensaje: cuerpo?.error?.message ?? 'Meta respondió con un error al validar las credenciales.',
+      };
+    } catch {
+      return {
+        exitoso: false,
+        mensaje: 'No se pudo contactar la API de WhatsApp. Revisa la conexión de red del servidor.',
+      };
+    }
+  }
+
   async actualizar(dto: ConfigurarWhatsappDto, usuarioId: string) {
     let configuracion = await this.obtener();
     const accessTokenCifrado = cifrar(dto.accessToken, this.claveSecreta());

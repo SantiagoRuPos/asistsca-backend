@@ -6,6 +6,7 @@ import { AsistenciaDiaria, OrigenAsistencia } from '../../config/entities/asiste
 import { Estado, CategoriaEstado } from '../../config/entities/catalogos/estado.entity';
 import { Estudiante } from '../../config/entities/academico/estudiante.entity';
 import { CrearExcusaDto } from './dto/crear-excusa.dto';
+import { FiltrarExcusasDto } from './dto/filtrar-excusas.dto';
 
 @Injectable()
 export class ExcusasService {
@@ -35,6 +36,7 @@ export class ExcusasService {
       motivo: dto.motivo,
       tipoExcusa: dto.tipoExcusa,
       archivoSoporteUrl: dto.archivoSoporteUrl ?? null,
+      archivoSoporteNombre: dto.archivoSoporteNombre ?? null,
       registradoPorUsuarioId,
       estado: estadoPendiente,
     });
@@ -42,12 +44,99 @@ export class ExcusasService {
     return this.excusaRepository.save(excusa);
   }
 
-  async listar(estudianteId?: string) {
-    return this.excusaRepository.find({
-      where: estudianteId ? { estudianteId } : {},
-      relations: ['estudiante', 'estado', 'registradoPorUsuario'],
-      order: { fechaRegistro: 'DESC' },
-    });
+  async listarFiltradas(filtros: FiltrarExcusasDto) {
+    const anioLectivo = new Date().getFullYear();
+    const pagina = filtros.pagina ?? 1;
+    const limite = filtros.limite ?? 10;
+
+    const query = this.excusaRepository
+      .createQueryBuilder('excusa')
+      .leftJoinAndSelect('excusa.estudiante', 'estudiante')
+      .leftJoinAndSelect('excusa.estado', 'estado')
+      .leftJoinAndSelect(
+        'estudiante.matriculas',
+        'matricula',
+        'matricula.anioLectivo = :anioLectivo',
+        { anioLectivo },
+      )
+      .leftJoinAndSelect('matricula.curso', 'curso');
+
+    if (filtros.q) {
+      query.andWhere(
+        '(estudiante.nombres ILIKE :q OR estudiante.apellidos ILIKE :q OR estudiante.numeroDocumento ILIKE :q)',
+        { q: `%${filtros.q}%` },
+      );
+    }
+    if (filtros.cursoId) {
+      query.andWhere('matricula.cursoId = :cursoId', { cursoId: filtros.cursoId });
+    }
+    if (filtros.estado) {
+      query.andWhere('estado.codigo = :estado', { estado: filtros.estado });
+    }
+    if (filtros.fechaInicio) {
+      query.andWhere('excusa.fechaAusencia >= :fechaInicio', { fechaInicio: filtros.fechaInicio });
+    }
+    if (filtros.fechaFin) {
+      query.andWhere('excusa.fechaAusencia <= :fechaFin', { fechaFin: filtros.fechaFin });
+    }
+
+    query
+      .orderBy('excusa.fechaRegistro', 'DESC')
+      .skip((pagina - 1) * limite)
+      .take(limite);
+
+    const [excusas, total] = await query.getManyAndCount();
+
+    const datos = excusas.map((excusa) => ({
+      id: excusa.id,
+      estudiante: {
+        id: excusa.estudiante.id,
+        nombres: excusa.estudiante.nombres,
+        apellidos: excusa.estudiante.apellidos,
+        tipoDocumento: excusa.estudiante.tipoDocumento,
+        numeroDocumento: excusa.estudiante.numeroDocumento,
+      },
+      curso: excusa.estudiante.matriculas?.[0]?.curso
+        ? { id: excusa.estudiante.matriculas[0].curso.id, nombre: excusa.estudiante.matriculas[0].curso.nombre }
+        : null,
+      fechaAusencia: excusa.fechaAusencia,
+      motivo: excusa.motivo,
+      tipoExcusa: excusa.tipoExcusa,
+      archivoSoporteUrl: excusa.archivoSoporteUrl,
+      archivoSoporteNombre: excusa.archivoSoporteNombre,
+      estado: { codigo: excusa.estado.codigo, nombre: excusa.estado.nombre },
+      fechaRegistro: excusa.fechaRegistro,
+    }));
+
+    return { datos, total, pagina, limite, totalPaginas: Math.max(1, Math.ceil(total / limite)) };
+  }
+
+  async obtenerResumen() {
+    const ahora = new Date();
+    const inicioMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
+
+    const contarPorEstado = (codigo: string, soloEsteMes: boolean) => {
+      const query = this.excusaRepository
+        .createQueryBuilder('excusa')
+        .innerJoin('excusa.estado', 'estado')
+        .where('estado.codigo = :codigo', { codigo });
+      if (soloEsteMes) {
+        query.andWhere('excusa.fechaRegistro >= :inicioMes', { inicioMes });
+      }
+      return query.getCount();
+    };
+
+    const [pendientes, aprobadasMes, negadasMes, totalMes] = await Promise.all([
+      contarPorEstado('pendiente', false),
+      contarPorEstado('aprobada', true),
+      contarPorEstado('rechazada', true),
+      this.excusaRepository
+        .createQueryBuilder('excusa')
+        .where('excusa.fechaRegistro >= :inicioMes', { inicioMes })
+        .getCount(),
+    ]);
+
+    return { pendientes, aprobadas: aprobadasMes, negadas: negadasMes, total: totalMes };
   }
 
   aprobar(id: string, decididoPorUsuarioId: string) {

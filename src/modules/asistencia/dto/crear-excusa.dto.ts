@@ -19,4 +19,9 @@ export class CrearExcusaDto {
   @IsOptional()
   @IsString()
   archivoSoporteUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  archivoSoporteNombre?: string;
 }
