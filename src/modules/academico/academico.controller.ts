@@ -20,10 +20,14 @@ const ROLES_LECTURA = ['admin', 'rector', 'coordinador', 'profesor'];
 export class AcademicoController {
   constructor(private readonly academicoService: AcademicoService) {}
 
+  // Antes solo admin/coordinador podían crear profesores. Se agregó "rector"
+  // porque la pantalla Usuarios (que ahora también registra profesores desde
+  // el modal "Nuevo usuario") solo la pueden abrir admin/rector — un rector
+  // habría recibido 403 al intentar registrar un profesor desde ahí.
   @Post('profesores')
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin', 'coordinador')
+  @Roles('admin', 'rector', 'coordinador')
   crearProfesor(@Body() dto: CrearProfesorDto) {
     return this.academicoService.crearProfesor(dto);
   }

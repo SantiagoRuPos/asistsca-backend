@@ -26,6 +26,10 @@ import { MatricularEstudianteDto } from './dto/matricular-estudiante.dto';
 import { EstudianteMasivoItemDto } from './dto/estudiante-masivo-item.dto';
 import { FiltrarEstudiantesDto } from './dto/filtrar-estudiantes.dto';
 import { RegistrarEstudianteCompletoDto } from './dto/registrar-estudiante-completo.dto';
+import { ConfigService } from '@nestjs/config';
+import { AppConfig } from '../../config/configuration';
+import { MailerService } from '../mailer/mailer.service';
+import { generarPasswordTemporal } from '../../common/utils/password.util';
 
 @Injectable()
 export class AcademicoService {
@@ -42,6 +46,8 @@ export class AcademicoService {
     @InjectRepository(Rol) private readonly rolRepository: Repository<Rol>,
     @InjectRepository(Estado) private readonly estadoRepository: Repository<Estado>,
     private readonly dataSource: DataSource,
+    private readonly mailerService: MailerService,
+    private readonly configService: ConfigService<AppConfig, true>,
   ) {}
 
   // ---------- Profesores ----------
@@ -80,9 +86,16 @@ export class AcademicoService {
       throw new ConflictException('No existe el estado activo de usuario en la tabla estados (falta el seed).');
     }
 
-    const passwordHash = await bcrypt.hash(dto.passwordTemporal, 12);
+    // La contraseña temporal ya no la escribe quien registra al profesor (el
+    // DTO ya no tiene ese campo): se genera aquí y se envía por correo, con el
+    // mismo patrón que UsuariosService.registrar() para las cuentas admin/rector/coordinador.
+    const passwordTemporal = generarPasswordTemporal();
+    const passwordHash = await bcrypt.hash(
+      passwordTemporal,
+      this.configService.get('security.bcryptSaltRounds', { infer: true }),
+    );
 
-    return this.dataSource.transaction(async (manager) => {
+    const { profesorGuardado, usuarioSinPassword } = await this.dataSource.transaction(async (manager) => {
       const profesor = manager.create(Profesor, {
         nombres: dto.nombres.trim(),
         apellidos: dto.apellidos.trim(),
@@ -105,8 +118,32 @@ export class AcademicoService {
       const usuarioGuardado = await manager.save(usuario);
 
       const { passwordHash: _omit, ...usuarioSinPassword } = usuarioGuardado;
-      return { profesor: profesorGuardado, usuario: usuarioSinPassword };
+      return { profesorGuardado, usuarioSinPassword };
     });
+
+    // El correo se envía después de confirmada la transacción — si el envío
+    // falla no se revierte la creación del profesor/usuario (igual que en
+    // UsuariosService.registrar()): la contraseña se devuelve una sola vez en
+    // la respuesta para que quien lo creó la entregue manualmente.
+    const brand = this.configService.get('brand', { infer: true });
+    const resultadoEnvio = await this.mailerService.enviarCorreo({
+      para: email,
+      asunto: `Tu acceso a ${brand.name}`,
+      html: `
+        <p>Hola ${dto.nombres.trim()},</p>
+        <p>Se creó una cuenta de profesor para ti en <strong>${brand.name}</strong>.</p>
+        <p>Correo: ${email}<br/>Contraseña temporal: <strong>${passwordTemporal}</strong></p>
+        <p>Por seguridad, el sistema te pedirá cambiarla la primera vez que inicies sesión.</p>
+      `,
+    });
+
+    return {
+      profesor: profesorGuardado,
+      usuario: { ...usuarioSinPassword, rol: { nombre: rolProfesor.nombre } },
+      correoEnviado: resultadoEnvio.enviado,
+      passwordTemporal: resultadoEnvio.enviado ? undefined : passwordTemporal,
+      motivoFalloEnvio: resultadoEnvio.motivo,
+    };
   }
 
   // ---------- Cursos ----------

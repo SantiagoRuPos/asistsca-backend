@@ -1,4 +1,4 @@
-import { IsEmail, IsNotEmpty, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class CrearProfesorDto {
   @IsString()
@@ -25,11 +25,8 @@ export class CrearProfesorDto {
   @MaxLength(30)
   telefono?: string;
 
-  @IsString()
-  @MinLength(10, { message: 'La contraseña temporal debe tener al menos 10 caracteres' })
-  @MaxLength(72)
-  @Matches(/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).+/, {
-    message: 'La contraseña temporal debe incluir mayúscula, minúscula, número y símbolo',
-  })
-  passwordTemporal!: string;
+  // La contraseña temporal ya no la escribe quien registra al profesor: se
+  // genera en el backend (AcademicoService.crearProfesor) y se envía por
+  // correo, con el mismo patrón que UsuariosService.registrar(). Antes este
+  // campo era obligatorio en el DTO — se quitó junto con esa validación.
 }
