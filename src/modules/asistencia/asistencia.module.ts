@@ -21,6 +21,7 @@ import { Acudiente } from '../../config/entities/academico/acudiente.entity';
 import { Usuario } from '../../config/entities/usuarios/usuario.entity';
 import { Estado } from '../../config/entities/catalogos/estado.entity';
 import { WhatsappModule } from '../whatsapp/whatsapp.module';
+import { TelegramApiModule } from '../../telegram_bot/telegram-api.module';
 
 @Module({
   imports: [
@@ -40,6 +41,12 @@ import { WhatsappModule } from '../whatsapp/whatsapp.module';
       Estado,
     ]),
     WhatsappModule,
+    // Para notificar por Telegram al rector/coordinador/director de grupo
+    // cuando se marca a un estudiante como "evadido" (ver registrarManual).
+    // Se importa el módulo de bajo nivel (sin lógica de conversación ni de
+    // whitelist) para no depender de TelegramBotModule, que a su vez importa
+    // este mismo AsistenciaModule (evita una dependencia circular).
+    TelegramApiModule,
   ],
   controllers: [
     AsistenciaController,

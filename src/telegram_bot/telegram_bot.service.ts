@@ -1,11 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Not, Repository } from 'typeorm';
-import axios from 'axios';
 import { Usuario } from '../config/entities/usuarios/usuario.entity';
 import { AcademicoService } from '../modules/academico/academico.service';
 import { AsistenciaService } from '../modules/asistencia/asistencia.service';
+import { TelegramApiService } from './telegram-api.service';
 
 // Telegram corta los mensajes por encima de 4096 caracteres (error 400 de su
 // API) — se deja un margen prudente para no arriesgarse con colegios grandes.
@@ -14,22 +13,13 @@ const LIMITE_CARACTERES_MENSAJE = 3500;
 @Injectable()
 export class TelegramBotService {
   private readonly logger = new Logger(TelegramBotService.name);
-  private readonly baseUrl: string;
 
   constructor(
-    private readonly configService: ConfigService,
     @InjectRepository(Usuario) private readonly usuarioRepository: Repository<Usuario>,
     private readonly academicoService: AcademicoService,
     private readonly asistenciaService: AsistenciaService,
-  ) {
-    const token = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
-
-    if (!token) {
-      throw new Error('TELEGRAM_BOT_TOKEN no está configurado');
-    }
-
-    this.baseUrl = `https://api.telegram.org/bot${token}`;
-  }
+    private readonly telegramApiService: TelegramApiService,
+  ) {}
 
   async procesarWebhook(body: any) {
     this.logger.log(`Webhook recibido: ${JSON.stringify(body)}`);
@@ -305,18 +295,6 @@ ${lineas}${notaRecorte}
   // ---------- Envío de mensajes ----------
 
   private async enviarMensaje(chatId: number, mensaje: string, replyMarkup?: Record<string, unknown>) {
-    try {
-      await axios.post(`${this.baseUrl}/sendMessage`, {
-        chat_id: chatId,
-        text: mensaje,
-        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
-      });
-
-      this.logger.log(`Mensaje enviado al chat ${chatId}`);
-    } catch (error) {
-      this.logger.error(`Error enviando mensaje al chat ${chatId}`, error);
-
-      throw error;
-    }
+    return this.telegramApiService.enviarMensaje(chatId, mensaje, replyMarkup);
   }
 }

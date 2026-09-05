@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { EventoAsistencia, TipoEvento } from '../../config/entities/nfc/evento-asistencia.entity';
@@ -9,14 +9,18 @@ import { Matricula } from '../../config/entities/academico/matricula.entity';
 import { HorarioCurso } from '../../config/entities/academico/horario-curso.entity';
 import { Estudiante } from '../../config/entities/academico/estudiante.entity';
 import { Curso } from '../../config/entities/academico/curso.entity';
+import { Usuario } from '../../config/entities/usuarios/usuario.entity';
 import { Estado, CategoriaEstado } from '../../config/entities/catalogos/estado.entity';
 import { RegistrarEventoDto } from './dto/registrar-evento.dto';
 import { FiltrarAsistenciaDiariaDto, VistaAsistencia } from './dto/filtrar-asistencia-diaria.dto';
 import { RegistrarAsistenciaManualDto, TipoRegistroManual } from './dto/registrar-asistencia-manual.dto';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { TelegramApiService } from '../../telegram_bot/telegram-api.service';
 
 @Injectable()
 export class AsistenciaService {
+  private readonly logger = new Logger(AsistenciaService.name);
+
   constructor(
     @InjectRepository(EventoAsistencia) private readonly eventoRepository: Repository<EventoAsistencia>,
     @InjectRepository(TarjetaNfc) private readonly tarjetaRepository: Repository<TarjetaNfc>,
@@ -25,8 +29,10 @@ export class AsistenciaService {
     @InjectRepository(HorarioCurso) private readonly horarioCursoRepository: Repository<HorarioCurso>,
     @InjectRepository(Estudiante) private readonly estudianteRepository: Repository<Estudiante>,
     @InjectRepository(Curso) private readonly cursoRepository: Repository<Curso>,
+    @InjectRepository(Usuario) private readonly usuarioRepository: Repository<Usuario>,
     @InjectRepository(Estado) private readonly estadoRepository: Repository<Estado>,
     private readonly whatsappService: WhatsappService,
+    private readonly telegramApiService: TelegramApiService,
   ) {}
 
   // ---------- Ingesta NFC (sin cambios de comportamiento) ----------
@@ -434,7 +440,21 @@ export class AsistenciaService {
 
   // ---------- Registro manual (staff, sin tarjeta NFC) ----------
 
-  async registrarManual(dto: RegistrarAsistenciaManualDto, usuarioId: string): Promise<AsistenciaDiaria> {
+  /**
+   * `rolSolicitante` viene del JWT (request.usuario.rol). Un profesor puede
+   * usar este endpoint únicamente para marcar "evadido" (ver
+   * AsistenciaConsultaController) — para cualquier otro tipoRegistro, esta
+   * es una segunda barrera además de @Roles, por si el endpoint cambiara.
+   */
+  async registrarManual(
+    dto: RegistrarAsistenciaManualDto,
+    usuarioId: string,
+    rolSolicitante: string,
+  ): Promise<AsistenciaDiaria> {
+    if (rolSolicitante === 'profesor' && dto.tipoRegistro !== TipoRegistroManual.EVADIDO) {
+      throw new ForbiddenException('Un profesor solo puede usar el registro manual para marcar "evadido".');
+    }
+
     const estudiante = await this.estudianteRepository.findOne({ where: { id: dto.estudianteId } });
     if (!estudiante) {
       throw new NotFoundException('El estudiante indicado no existe.');
@@ -444,7 +464,10 @@ export class AsistenciaService {
     const horaTexto = dto.hora ?? this.obtenerHoraActualBogota();
     const instante = this.construirInstanteBogota(fecha, `${horaTexto}:00`);
 
-    let existente = await this.asistenciaDiariaRepository.findOne({ where: { estudianteId: estudiante.id, fecha } });
+    let existente = await this.asistenciaDiariaRepository.findOne({
+      where: { estudianteId: estudiante.id, fecha },
+      relations: ['estado'],
+    });
 
     if (dto.tipoRegistro === TipoRegistroManual.SALIDA) {
       if (!existente) {
@@ -457,6 +480,23 @@ export class AsistenciaService {
       }
       existente.horaSalida = instante;
       existente.eventoSalidaId = null;
+    } else if (dto.tipoRegistro === TipoRegistroManual.EVADIDO) {
+      // Regla de negocio: "evadido" solo aplica a un estudiante que SÍ llegó
+      // al colegio hoy (ya tiene un registro de entrada presente/tarde) pero
+      // luego no está donde debería (por ejemplo, un profesor revisa su
+      // salón y no lo encuentra). Nunca se puede marcar evadido a alguien
+      // que nunca llegó — eso sigue siendo "ausente".
+      if (!existente || !['presente', 'tarde'].includes(existente.estado?.codigo)) {
+        throw new ConflictException(
+          'Solo se puede marcar como "evadido" a un estudiante que ya tiene registrada su llegada (presente o tarde) hoy.',
+        );
+      }
+
+      const estado = await this.buscarEstado(dto.tipoRegistro);
+      existente.estado = estado;
+      // A diferencia de ausente/excusado, aquí NO se borra horaEntrada ni
+      // eventoEntradaId: son la evidencia de que el estudiante sí llegó, y
+      // se conservan para la notificación y para cualquier reporte futuro.
     } else {
       const estado = await this.buscarEstado(dto.tipoRegistro);
 
@@ -467,9 +507,7 @@ export class AsistenciaService {
       existente.estado = estado;
       existente.eventoEntradaId = null;
       existente.horaEntrada =
-        dto.tipoRegistro === TipoRegistroManual.AUSENTE ||
-        dto.tipoRegistro === TipoRegistroManual.EXCUSADO ||
-        dto.tipoRegistro === TipoRegistroManual.EVADIDO
+        dto.tipoRegistro === TipoRegistroManual.AUSENTE || dto.tipoRegistro === TipoRegistroManual.EXCUSADO
           ? null
           : instante;
     }
@@ -479,7 +517,86 @@ export class AsistenciaService {
     existente.fechaVerificacion = new Date();
     existente.observacionVerificacion = dto.observacion;
 
-    return this.asistenciaDiariaRepository.save(existente);
+    const guardado = await this.asistenciaDiariaRepository.save(existente);
+
+    if (dto.tipoRegistro === TipoRegistroManual.EVADIDO) {
+      // Best-effort: si Telegram falla, la marca de evadido ya quedó
+      // guardada — solo se registra el error en el log, nunca se revierte
+      // ni se le muestra un error al profesor por esto.
+      this.notificarEvadido(estudiante, guardado).catch((error) => {
+        this.logger.error(`No se pudo notificar por Telegram el evadido del estudiante ${estudiante.id}`, error);
+      });
+    }
+
+    return guardado;
+  }
+
+  /**
+   * Notifica por Telegram (a través del bot) a todo el personal que debe
+   * enterarse de que un estudiante fue marcado como evadido: rector,
+   * coordinador(es) y el profesor director de grupo del curso actual del
+   * estudiante. Solo llegan al usuario que ya vinculó su cuenta de Telegram
+   * (telegramChatId no nulo) — a nadie más se le puede escribir por este
+   * medio. No lanza errores hacia quien la llama: cualquier fallo queda
+   * únicamente en el log.
+   */
+  private async notificarEvadido(estudiante: Estudiante, registro: AsistenciaDiaria): Promise<void> {
+    const anioLectivo = new Date().getFullYear();
+
+    const matricula = await this.matriculaRepository.findOne({
+      where: { estudianteId: estudiante.id, anioLectivo },
+      relations: ['curso', 'curso.profesorDirector'],
+    });
+
+    const destinatarios = await this.usuarioRepository
+      .createQueryBuilder('usuario')
+      .innerJoin('usuario.rol', 'rol')
+      .innerJoin('usuario.estado', 'estado')
+      .where('estado.codigo = :codigo', { codigo: 'activo' })
+      .andWhere('usuario.telegramChatId IS NOT NULL')
+      .andWhere('rol.nombre IN (:...roles)', { roles: ['rector', 'coordinador'] })
+      .getMany();
+
+    if (matricula?.curso?.profesorDirector) {
+      const director = await this.usuarioRepository.findOne({
+        where: { profesorId: matricula.curso.profesorDirector.id },
+        relations: ['estado'],
+      });
+
+      if (
+        director &&
+        director.estado?.codigo === 'activo' &&
+        director.telegramChatId &&
+        !destinatarios.some((d) => d.id === director.id)
+      ) {
+        destinatarios.push(director);
+      }
+    }
+
+    if (destinatarios.length === 0) {
+      return;
+    }
+
+    const horaEntradaTexto = registro.horaEntrada ? this.formatearHoraBogota(registro.horaEntrada) : 'desconocida';
+    const cursoNombre = matricula?.curso?.nombre ?? 'sin curso asignado';
+
+    const mensaje = `
+🚪 Estudiante marcado como EVADIDO
+
+Estudiante: ${estudiante.nombres} ${estudiante.apellidos}
+Curso: ${cursoNombre}
+Hora de llegada registrada: ${horaEntradaTexto}
+Fecha: ${registro.fecha}
+Observación: ${registro.observacionVerificacion ?? '(sin observación)'}
+    `.trim();
+
+    await Promise.all(
+      destinatarios.map((destinatario) =>
+        this.telegramApiService.enviarMensaje(destinatario.telegramChatId as string, mensaje).catch((error) => {
+          this.logger.error(`No se pudo notificar al usuario ${destinatario.id} sobre un evadido`, error);
+        }),
+      ),
+    );
   }
 
   // ---------- Utilidades ----------
@@ -504,12 +621,18 @@ export class AsistenciaService {
   }
 
   private obtenerHoraActualBogota(): string {
+    return this.formatearHoraBogota(new Date());
+  }
+
+  /** Igual que obtenerHoraActualBogota, pero para un instante arbitrario (por
+   * ejemplo, la horaEntrada guardada de un registro) en vez de "ahora". */
+  private formatearHoraBogota(fecha: Date): string {
     return new Intl.DateTimeFormat('en-GB', {
       timeZone: 'America/Bogota',
       hour: '2-digit',
       minute: '2-digit',
       hour12: false,
-    }).format(new Date());
+    }).format(fecha);
   }
 
   private obtenerDiaSemanaBogota(fecha: Date): number {

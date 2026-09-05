@@ -9,6 +9,10 @@ import { Auditar } from '../../common/decorators/auditar.decorator';
 
 const ROLES_LECTURA = ['admin', 'rector', 'coordinador', 'profesor'];
 const ROLES_GESTION = ['admin', 'rector', 'coordinador'];
+// El registro manual admite además a "profesor", pero solo para marcar
+// evadido — la restricción al tipoRegistro se hace dentro del propio
+// AsistenciaService.registrarManual (buscar rolSolicitante === 'profesor').
+const ROLES_REGISTRO_MANUAL = ['admin', 'rector', 'coordinador', 'profesor'];
 
 @Controller('asistencia')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -34,9 +38,9 @@ export class AsistenciaConsultaController {
   }
 
   @Post('diaria/manual')
-  @Roles(...ROLES_GESTION)
+  @Roles(...ROLES_REGISTRO_MANUAL)
   @Auditar('registrar_asistencia_manual', 'asistencia_diaria')
   registrarManual(@Body() dto: RegistrarAsistenciaManualDto, @Req() request: any) {
-    return this.asistenciaService.registrarManual(dto, request.usuario.sub);
+    return this.asistenciaService.registrarManual(dto, request.usuario.sub, request.usuario.rol);
   }
 }
