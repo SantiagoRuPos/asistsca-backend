@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -9,6 +9,7 @@ import { Usuario } from '../../config/entities/usuarios/usuario.entity';
 import { RefreshToken } from '../../config/entities/auth/refresh-token.entity';
 import { AppConfig } from '../../config/configuration';
 import { LoginDto } from './dto/login.dto';
+import { TelegramApiService } from '../../telegram_bot/telegram-api.service';
 
 interface ContextoRequest {
   ip?: string;
@@ -17,11 +18,14 @@ interface ContextoRequest {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     @InjectRepository(Usuario) private readonly usuarioRepository: Repository<Usuario>,
     @InjectRepository(RefreshToken) private readonly refreshTokenRepository: Repository<RefreshToken>,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService<AppConfig, true>,
+    private readonly telegramApiService: TelegramApiService,
   ) {}
 
   async login(dto: LoginDto, contexto: ContextoRequest) {
@@ -49,7 +53,53 @@ const usuario = await this.usuarioRepository.findOne({ where: { email }, relatio
     await this.usuarioRepository.save(usuario);
 
     const { refreshTokenId, ...tokens } = await this.emitirTokens(usuario, contexto);
+
+    // Alerta de seguridad por Telegram: se le avisa a la propia persona (no a
+    // un administrador) cada vez que su cuenta inicia sesión, para que pueda
+    // detectar un acceso que no reconoce (contraseña filtrada, etc.) y
+    // reaccionar de inmediato. Solo en login real con contraseña — no en cada
+    // refresh silencioso del access token (eso pasa cada 15 minutos mientras
+    // el navegador siga abierto y sería puro ruido). Mejor esfuerzo: si
+    // Telegram falla o la persona no tiene su cuenta vinculada, el login
+    // nunca se ve afectado.
+    this.notificarInicioSesion(usuario, contexto).catch((error) => {
+      this.logger.error(`No se pudo notificar por Telegram el inicio de sesión de ${usuario.email}`, error);
+    });
+
     return tokens;
+  }
+
+  /**
+   * Best-effort: manda un aviso de "se inició sesión en tu cuenta" al chat de
+   * Telegram ya vinculado del propio usuario (ver TelegramBotService — el
+   * vínculo se crea cuando la persona verifica su número con el bot). Si no
+   * tiene Telegram vinculado todavía, no se envía nada.
+   */
+  private async notificarInicioSesion(usuario: Usuario, contexto: ContextoRequest): Promise<void> {
+    if (!usuario.telegramChatId) {
+      return;
+    }
+
+    const fechaTexto = new Intl.DateTimeFormat('es-CO', {
+      timeZone: 'America/Bogota',
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(new Date());
+
+    const dispositivo = contexto.userAgent ? contexto.userAgent.slice(0, 120) : 'desconocido';
+    const ip = contexto.ip ?? 'desconocida';
+
+    const mensaje = `
+🔐 Se inició sesión en tu cuenta de AsistSCA
+
+Fecha: ${fechaTexto} (hora Colombia)
+IP: ${ip}
+Dispositivo: ${dispositivo}
+
+Si no fuiste tú, cambia tu contraseña de inmediato desde "Mi perfil" y avisa a un administrador.
+    `.trim();
+
+    await this.telegramApiService.enviarMensaje(usuario.telegramChatId, mensaje);
   }
 
   async refrescar(refreshTokenRecibido: string, contexto: ContextoRequest) {
@@ -110,7 +160,17 @@ const usuario = await this.usuarioRepository.findOne({ where: { email }, relatio
   }
 
 private async emitirTokens(usuario: Usuario, contexto: ContextoRequest) {
-const payload = { sub: usuario.id, email: usuario.email, rol: usuario.rol.nombre };
+const payload = {
+  sub: usuario.id,
+  email: usuario.email,
+  rol: usuario.rol.nombre,
+  nombreCompleto: usuario.nombreCompleto,
+  // El frontend usa esto para forzar la redirección a "Mi perfil" hasta que
+  // la persona cambie su contraseña temporal (ver PerfilComponent y el guard
+  // forzarCambioPasswordGuard) — viaja en el access token igual que el rol,
+  // así que queda al día en cuanto se emite un token nuevo (login o refresh).
+  debeCambiarPassword: usuario.debeCambiarPassword,
+};
   const accessToken = this.jwtService.sign(payload, {
     secret: this.configService.get('jwt.accessSecret', { infer: true }),
     expiresIn: this.configService.get('jwt.accessExpiresIn', { infer: true }) as any,

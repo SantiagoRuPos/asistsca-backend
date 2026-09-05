@@ -10,8 +10,10 @@ import { Auditar } from '../../common/decorators/auditar.decorator';
 const ROLES_LECTURA = ['admin', 'rector', 'coordinador', 'profesor'];
 const ROLES_GESTION = ['admin', 'rector', 'coordinador'];
 // El registro manual admite además a "profesor", pero solo para marcar
-// evadido — la restricción al tipoRegistro se hace dentro del propio
-// AsistenciaService.registrarManual (buscar rolSolicitante === 'profesor').
+// entrada (el sistema decide presente/tarde), salida o evadido — nunca
+// presente/tarde/ausente/excusado directamente. La restricción al
+// tipoRegistro se hace dentro del propio AsistenciaService.registrarManual
+// (buscar rolSolicitante === 'profesor').
 const ROLES_REGISTRO_MANUAL = ['admin', 'rector', 'coordinador', 'profesor'];
 
 @Controller('asistencia')

@@ -3,6 +3,7 @@ import { UsuariosService } from './usuarios.service';
 import { CrearUsuarioDto } from './dto/crear-usuario.dto';
 import { RegistrarUsuarioDto } from './dto/registrar-usuario.dto';
 import { FiltrarUsuariosDto } from './dto/filtrar-usuarios.dto';
+import { CambiarPasswordDto } from './dto/cambiar-password.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -63,5 +64,24 @@ export class UsuariosController {
   @Auditar('desactivar_usuario', 'usuario')
   desactivar(@Param('id') id: string, @Req() req: any) {
     return this.usuariosService.desactivar(id, req.usuario.sub);
+  }
+
+  // ---------- Mi perfil: cualquier rol autenticado, solo sobre sí mismo ----------
+  // A propósito SIN @Roles/@RolesGuard: cualquier cuenta activa (admin,
+  // rector, coordinador o profesor) puede ver y actualizar su propia
+  // contraseña — esto no es "gestión de usuarios" (eso sigue reservado a
+  // ROLES_GESTION_USUARIOS arriba), es la cuenta de quien hace la llamada.
+
+  @Get('mi-perfil')
+  @UseGuards(JwtAuthGuard)
+  obtenerMiPerfil(@Req() req: any) {
+    return this.usuariosService.obtenerMiPerfil(req.usuario.sub);
+  }
+
+  @Patch('mi-perfil/password')
+  @UseGuards(JwtAuthGuard)
+  @Auditar('cambiar_password_propia', 'usuario')
+  cambiarMiPassword(@Body() dto: CambiarPasswordDto, @Req() req: any) {
+    return this.usuariosService.cambiarMiPassword(req.usuario.sub, dto);
   }
 }

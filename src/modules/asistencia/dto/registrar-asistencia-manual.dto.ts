@@ -7,6 +7,7 @@ export enum TipoRegistroManual {
   EXCUSADO = 'excusado',
   EVADIDO = 'evadido',
   SALIDA = 'salida',
+  ENTRADA = 'entrada',
 }
 
 export class RegistrarAsistenciaManualDto {

@@ -442,17 +442,26 @@ export class AsistenciaService {
 
   /**
    * `rolSolicitante` viene del JWT (request.usuario.rol). Un profesor puede
-   * usar este endpoint únicamente para marcar "evadido" (ver
-   * AsistenciaConsultaController) — para cualquier otro tipoRegistro, esta
-   * es una segunda barrera además de @Roles, por si el endpoint cambiara.
+   * usar este endpoint únicamente para marcar "entrada" (el sistema decide
+   * presente/tarde automáticamente, igual que el flujo NFC), "salida" o
+   * "evadido" (ver AsistenciaConsultaController) — para cualquier otro
+   * tipoRegistro, esta es una segunda barrera además de @Roles, por si el
+   * endpoint cambiara. Puede aplicarse a cualquier estudiante del colegio.
    */
   async registrarManual(
     dto: RegistrarAsistenciaManualDto,
     usuarioId: string,
     rolSolicitante: string,
   ): Promise<AsistenciaDiaria> {
-    if (rolSolicitante === 'profesor' && dto.tipoRegistro !== TipoRegistroManual.EVADIDO) {
-      throw new ForbiddenException('Un profesor solo puede usar el registro manual para marcar "evadido".');
+    const TIPOS_PERMITIDOS_PROFESOR = [
+      TipoRegistroManual.ENTRADA,
+      TipoRegistroManual.SALIDA,
+      TipoRegistroManual.EVADIDO,
+    ];
+    if (rolSolicitante === 'profesor' && !TIPOS_PERMITIDOS_PROFESOR.includes(dto.tipoRegistro)) {
+      throw new ForbiddenException(
+        'Un profesor solo puede usar el registro manual para marcar entrada, salida o "evadido".',
+      );
     }
 
     const estudiante = await this.estudianteRepository.findOne({ where: { id: dto.estudianteId } });
@@ -469,7 +478,20 @@ export class AsistenciaService {
       relations: ['estado'],
     });
 
-    if (dto.tipoRegistro === TipoRegistroManual.SALIDA) {
+    if (dto.tipoRegistro === TipoRegistroManual.ENTRADA) {
+      // El sistema decide presente/tarde automáticamente, igual que el
+      // flujo de ingesta NFC (ver actualizarAsistenciaDiaria) — el profesor
+      // nunca elige directamente presente/tarde/ausente/excusado.
+      const estado = await this.calcularEstadoEntrada(estudiante.id, fecha, instante);
+
+      if (!existente) {
+        existente = this.asistenciaDiariaRepository.create({ estudianteId: estudiante.id, fecha });
+      }
+
+      existente.estado = estado;
+      existente.horaEntrada = instante;
+      existente.eventoEntradaId = null;
+    } else if (dto.tipoRegistro === TipoRegistroManual.SALIDA) {
       if (!existente) {
         const estadoPresente = await this.buscarEstado('presente');
         existente = this.asistenciaDiariaRepository.create({
@@ -600,6 +622,40 @@ Observación: ${registro.observacionVerificacion ?? '(sin observación)'}
   }
 
   // ---------- Utilidades ----------
+
+  /**
+   * Determina si una "entrada" manual (registrada por un profesor desde
+   * Carnets, sin tarjeta NFC) cuenta como "presente" o "tarde", replicando
+   * el mismo umbral que usa el flujo automático de NFC
+   * (actualizarAsistenciaDiaria) — implementado como método separado para
+   * no arriesgar ese flujo, ya en producción.
+   */
+  private async calcularEstadoEntrada(estudianteId: string, fecha: string, instante: Date): Promise<Estado> {
+    const anioLectivo = new Date().getFullYear();
+    const matricula = await this.matriculaRepository.findOne({
+      where: { estudianteId, anioLectivo },
+      relations: ['curso'],
+    });
+
+    let codigoEstado = 'presente';
+
+    if (matricula?.curso) {
+      const diaSemana = this.obtenerDiaSemanaBogota(instante);
+      const horario = await this.horarioCursoRepository.findOne({
+        where: { cursoId: matricula.curso.id, diaSemana },
+      });
+
+      if (horario) {
+        const limiteEntrada = this.sumarMinutos(
+          this.construirInstanteBogota(fecha, horario.horaEntrada),
+          horario.minutosToleranciaTardanza,
+        );
+        codigoEstado = instante.getTime() <= limiteEntrada.getTime() ? 'presente' : 'tarde';
+      }
+    }
+
+    return this.buscarEstado(codigoEstado);
+  }
 
   private async buscarEstado(codigo: string): Promise<Estado> {
     const estado = await this.estadoRepository.findOne({

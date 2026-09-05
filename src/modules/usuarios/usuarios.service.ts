@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
@@ -8,6 +8,7 @@ import { Estado, CategoriaEstado } from '../../config/entities/catalogos/estado.
 import { CrearUsuarioDto } from './dto/crear-usuario.dto';
 import { RegistrarUsuarioDto } from './dto/registrar-usuario.dto';
 import { FiltrarUsuariosDto } from './dto/filtrar-usuarios.dto';
+import { CambiarPasswordDto } from './dto/cambiar-password.dto';
 import { MailerService } from '../mailer/mailer.service';
 import { ConfigService } from '@nestjs/config';
 import { AppConfig } from '../../config/configuration';
@@ -230,5 +231,72 @@ export class UsuariosService {
     const guardado = await this.usuarioRepository.save(usuario);
     const { passwordHash: _omit, ...sinPassword } = guardado;
     return sinPassword;
+  }
+
+  // ---------- Mi perfil (cualquier usuario autenticado, sobre sí mismo) ----------
+
+  /**
+   * Datos propios para la pantalla "Mi perfil" — a propósito devuelve mucho
+   * menos que `listarFiltrados` (pensado para admin/rector viendo a otros):
+   * aquí no hace falta paginar ni filtrar, es siempre "yo".
+   */
+  async obtenerMiPerfil(usuarioId: string) {
+    const usuario = await this.usuarioRepository.findOne({
+      where: { id: usuarioId },
+      relations: ['rol', 'estado'],
+    });
+    if (!usuario) {
+      throw new NotFoundException('Tu usuario ya no existe.');
+    }
+
+    return {
+      id: usuario.id,
+      nombreCompleto: usuario.nombreCompleto,
+      email: usuario.email,
+      telefono: usuario.telefono,
+      rol: { nombre: usuario.rol.nombre },
+      estado: { codigo: usuario.estado.codigo, nombre: usuario.estado.nombre },
+      debeCambiarPassword: usuario.debeCambiarPassword,
+      // Solo se informa SI está vinculado o no (para mostrar un check/aviso en
+      // la pantalla) — nunca el chatId real, que no le sirve de nada a la
+      // interfaz y no debería viajar innecesariamente por la red.
+      telegramVinculado: usuario.telegramChatId !== null,
+      ultimoLogin: usuario.ultimoLogin,
+    };
+  }
+
+  /**
+   * Cambio de contraseña por el propio usuario, ya sea porque quiso hacerlo
+   * (rutina de seguridad normal) o porque el sistema se lo exige
+   * (`debeCambiarPassword`, ej. contraseña temporal recién asignada por un
+   * administrador). En ambos casos exige la contraseña actual — incluso una
+   * temporal la conoce quien la recibió, así que no es una barrera real para
+   * el caso obligatorio, y sí evita que alguien con la sesión abierta pero
+   * sin la contraseña (computador desatendido) pueda cambiarla.
+   */
+  async cambiarMiPassword(usuarioId: string, dto: CambiarPasswordDto): Promise<{ mensaje: string }> {
+    const usuario = await this.usuarioRepository.findOne({ where: { id: usuarioId } });
+    if (!usuario) {
+      throw new NotFoundException('Tu usuario ya no existe.');
+    }
+
+    const passwordValida = await bcrypt.compare(dto.passwordActual, usuario.passwordHash);
+    if (!passwordValida) {
+      throw new UnauthorizedException('La contraseña actual no es correcta.');
+    }
+
+    const mismaPassword = await bcrypt.compare(dto.passwordNueva, usuario.passwordHash);
+    if (mismaPassword) {
+      throw new ConflictException('La contraseña nueva debe ser diferente de la actual.');
+    }
+
+    usuario.passwordHash = await bcrypt.hash(
+      dto.passwordNueva,
+      this.configService.get('security.bcryptSaltRounds', { infer: true }),
+    );
+    usuario.debeCambiarPassword = false;
+    await this.usuarioRepository.save(usuario);
+
+    return { mensaje: 'Contraseña actualizada correctamente.' };
   }
 }

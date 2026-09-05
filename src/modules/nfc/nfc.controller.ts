@@ -34,8 +34,11 @@ export class NfcController {
     return this.nfcService.asignarTarjeta(dto);
   }
 
+  // Un profesor puede ver los carnets (incluido el UID) para usarlos como
+  // referencia al registrar asistencia manual desde la pantalla de Carnets
+  // — no puede asignar carnets nuevos (POST arriba sigue admin/coordinador).
   @Get('tarjetas')
-  @Roles('admin', 'rector', 'coordinador')
+  @Roles('admin', 'rector', 'coordinador', 'profesor')
   listarTarjetas() {
     return this.nfcService.listarTarjetas();
   }
