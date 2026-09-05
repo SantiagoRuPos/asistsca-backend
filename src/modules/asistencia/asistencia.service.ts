@@ -289,6 +289,50 @@ export class AsistenciaService {
     };
   }
 
+  /**
+   * Evadidos de todo el colegio en una fecha (por defecto hoy) — a diferencia
+   * de `obtenerResumenCurso`, que ya calculaba esto pero solo para un curso a
+   * la vez, este método no filtra por curso. Se usa desde el bot de Telegram
+   * (comando "evadidos") y queda disponible para cualquier otro consumidor
+   * que necesite la lista global.
+   */
+  async obtenerEvadidosHoy(fecha?: string) {
+    const fechaFiltro = fecha ?? this.obtenerFechaBogota(new Date());
+    const anioLectivo = new Date().getFullYear();
+
+    const totalMatriculados = await this.matriculaRepository.count({ where: { anioLectivo } });
+
+    const registros = await this.asistenciaDiariaRepository
+      .createQueryBuilder('ad')
+      .innerJoinAndSelect('ad.estudiante', 'estudiante')
+      .innerJoin('ad.estado', 'estado')
+      .leftJoinAndSelect('estudiante.matriculas', 'matricula', 'matricula.anioLectivo = :anioLectivo', {
+        anioLectivo,
+      })
+      .leftJoinAndSelect('matricula.curso', 'curso')
+      .where('ad.fecha = :fecha', { fecha: fechaFiltro })
+      .andWhere('estado.codigo = :codigo', { codigo: 'evadido' })
+      .orderBy('curso.nombre', 'ASC')
+      .addOrderBy('estudiante.apellidos', 'ASC')
+      .getMany();
+
+    const estudiantes = registros.map((registro) => ({
+      id: registro.estudiante.id,
+      nombres: registro.estudiante.nombres,
+      apellidos: registro.estudiante.apellidos,
+      curso: registro.estudiante.matriculas?.[0]?.curso?.nombre ?? null,
+    }));
+
+    const porcentaje = totalMatriculados > 0 ? Math.round((estudiantes.length / totalMatriculados) * 100) : 0;
+
+    return {
+      fecha: fechaFiltro,
+      valor: estudiantes.length,
+      porcentaje,
+      estudiantes,
+    };
+  }
+
   // ---------- Resumen de asistencia por curso (vista "Cursos > detalle") ----------
 
   async obtenerResumenCurso(cursoId: string, fecha?: string) {

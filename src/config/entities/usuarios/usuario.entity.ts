@@ -29,6 +29,12 @@ export class Usuario {
   @Column({ name: 'telefono', type: 'varchar', length: 30, nullable: true })
   telefono!: string | null;
 
+  // Se completa solo cuando el usuario verifica su identidad en el bot de
+  // Telegram compartiendo su número de teléfono (ver TelegramBotService) —
+  // nunca se pide ni se guarda a mano desde la interfaz web.
+  @Column({ name: 'telegram_chat_id', type: 'varchar', length: 32, nullable: true })
+  telegramChatId!: string | null;
+
   @Column({ name: 'rol_id' })
   rolId!: string;
 

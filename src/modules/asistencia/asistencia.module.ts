@@ -48,5 +48,9 @@ import { WhatsappModule } from '../whatsapp/whatsapp.module';
     AutorizacionesSalidaController,
   ],
   providers: [AsistenciaService, ExcusasService, AutorizacionesSalidaService],
+  // AsistenciaService se exporta para que el bot de Telegram (TelegramBotModule)
+  // pueda reutilizar el resumen diario y el nuevo obtenerEvadidosHoy() sin
+  // duplicar la lógica de consulta a asistencia_diaria.
+  exports: [AsistenciaService],
 })
 export class AsistenciaModule {}

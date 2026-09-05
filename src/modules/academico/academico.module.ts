@@ -33,5 +33,8 @@ import { MailerModule } from '../mailer/mailer.module';
   ],
   controllers: [AcademicoController],
   providers: [AcademicoService],
+  // AcademicoService se exporta para que el bot de Telegram (TelegramBotModule)
+  // pueda reutilizar obtenerResumenEstudiantes() sin duplicar la consulta.
+  exports: [AcademicoService],
 })
 export class AcademicoModule {}
