@@ -16,6 +16,7 @@ import { ComunicacionesModule } from './modules/comunicaciones/comunicaciones.mo
 import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
 import { AuditoriaModule } from './modules/auditoria/auditoria.module';
 import { TelegramBotModule } from './telegram_bot/telegram_bot.module';
+import { ReportesModule } from './modules/reportes/reportes.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { TelegramBotModule } from './telegram_bot/telegram_bot.module';
     WhatsappModule,
     AuditoriaModule,
     TelegramBotModule,
+    ReportesModule,
   ],
   providers: [
     {

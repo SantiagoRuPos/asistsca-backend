@@ -6,6 +6,9 @@ import { CambiarDirectorCursoDto } from './dto/cambiar-director-curso.dto';
 import { CrearHorarioCursoDto } from './dto/crear-horario-curso.dto';
 import { CrearEstudianteDto } from './dto/crear-estudiante.dto';
 import { CrearAcudienteDto } from './dto/crear-acudiente.dto';
+import { FiltrarAcudientesDto } from './dto/filtrar-acudientes.dto';
+import { ActualizarAcudienteDto } from './dto/actualizar-acudiente.dto';
+import { ActualizarContactoAcudienteDto } from './dto/actualizar-contacto-acudiente.dto';
 import { MatricularEstudianteDto } from './dto/matricular-estudiante.dto';
 import { FiltrarEstudiantesDto } from './dto/filtrar-estudiantes.dto';
 import { RegistrarEstudianteCompletoDto } from './dto/registrar-estudiante-completo.dto';
@@ -91,6 +94,31 @@ export class AcademicoController {
   @Roles(...ROLES_GESTION)
   crearAcudiente(@Body() dto: CrearAcudienteDto) {
     return this.academicoService.crearAcudiente(dto);
+  }
+
+  @Get('acudientes')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ROLES_GESTION)
+  listarAcudientes(@Query() filtros: FiltrarAcudientesDto) {
+    return this.academicoService.listarAcudientes(filtros);
+  }
+
+  @Patch('acudientes/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ROLES_GESTION)
+  actualizarAcudiente(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ActualizarAcudienteDto) {
+    return this.academicoService.actualizarAcudiente(id, dto);
+  }
+
+  @Patch('estudiantes/:estudianteId/acudientes/:acudienteId/contacto')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ROLES_GESTION)
+  actualizarContactoNotificacion(
+    @Param('estudianteId', ParseUUIDPipe) estudianteId: string,
+    @Param('acudienteId', ParseUUIDPipe) acudienteId: string,
+    @Body() dto: ActualizarContactoAcudienteDto,
+  ) {
+    return this.academicoService.actualizarContactoNotificacion(estudianteId, acudienteId, dto);
   }
 
   @Post('matriculas')

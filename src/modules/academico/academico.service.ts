@@ -26,6 +26,9 @@ import { MatricularEstudianteDto } from './dto/matricular-estudiante.dto';
 import { EstudianteMasivoItemDto } from './dto/estudiante-masivo-item.dto';
 import { FiltrarEstudiantesDto } from './dto/filtrar-estudiantes.dto';
 import { RegistrarEstudianteCompletoDto } from './dto/registrar-estudiante-completo.dto';
+import { FiltrarAcudientesDto } from './dto/filtrar-acudientes.dto';
+import { ActualizarAcudienteDto } from './dto/actualizar-acudiente.dto';
+import { ActualizarContactoAcudienteDto } from './dto/actualizar-contacto-acudiente.dto';
 import { ConfigService } from '@nestjs/config';
 import { AppConfig } from '../../config/configuration';
 import { MailerService } from '../mailer/mailer.service';
@@ -405,6 +408,88 @@ export class AcademicoService {
     }
 
     return acudienteGuardado;
+  }
+
+  async listarAcudientes(filtros: FiltrarAcudientesDto) {
+    const pagina = filtros.pagina ?? 1;
+    const limite = filtros.limite ?? 10;
+
+    const qb = this.acudienteRepository
+      .createQueryBuilder('acudiente')
+      .leftJoinAndSelect('acudiente.estudiantes', 'vinculo')
+      .leftJoinAndSelect('vinculo.estudiante', 'estudianteVinculado');
+
+    if (filtros.q) {
+      qb.andWhere(
+        '(acudiente.nombres ILIKE :q OR acudiente.apellidos ILIKE :q OR acudiente.numeroDocumento ILIKE :q OR acudiente.telefonoWhatsapp ILIKE :q)',
+        { q: `%${filtros.q}%` },
+      );
+    }
+
+    qb.orderBy('acudiente.apellidos', 'ASC').addOrderBy('acudiente.nombres', 'ASC');
+    qb.skip((pagina - 1) * limite).take(limite);
+
+    const [acudientes, total] = await qb.getManyAndCount();
+
+    const datos = acudientes.map((acudiente) => ({
+      id: acudiente.id,
+      nombres: acudiente.nombres,
+      apellidos: acudiente.apellidos,
+      parentesco: acudiente.parentesco,
+      telefonoWhatsapp: acudiente.telefonoWhatsapp,
+      email: acudiente.email,
+      numeroDocumento: acudiente.numeroDocumento,
+      estudiantes: (acudiente.estudiantes ?? []).map((vinculo) => ({
+        id: vinculo.estudiante.id,
+        nombres: vinculo.estudiante.nombres,
+        apellidos: vinculo.estudiante.apellidos,
+        esContactoNotificacion: vinculo.esContactoNotificacion,
+      })),
+    }));
+
+    return {
+      datos,
+      total,
+      pagina,
+      limite,
+      totalPaginas: Math.max(1, Math.ceil(total / limite)),
+    };
+  }
+
+  async actualizarAcudiente(id: string, dto: ActualizarAcudienteDto) {
+    const acudiente = await this.acudienteRepository.findOne({ where: { id } });
+    if (!acudiente) {
+      throw new NotFoundException('El acudiente indicado no existe.');
+    }
+
+    if (dto.nombre !== undefined) acudiente.nombres = dto.nombre.trim();
+    if (dto.apellidos !== undefined) acudiente.apellidos = dto.apellidos.trim();
+    if (dto.parentesco !== undefined) acudiente.parentesco = dto.parentesco;
+    if (dto.telefonoWhatsapp !== undefined) acudiente.telefonoWhatsapp = dto.telefonoWhatsapp.trim();
+    if (dto.email !== undefined) acudiente.email = dto.email.trim();
+    if (dto.numeroDocumento !== undefined) acudiente.numeroDocumento = dto.numeroDocumento.trim();
+
+    return this.acudienteRepository.save(acudiente);
+  }
+
+  // Es un toggle por vínculo, no una elección exclusiva: WhatsappService ya
+  // notifica a TODOS los acudientes de un estudiante marcados como contacto
+  // (ver whatsapp.service.ts), así que aquí se respeta el mismo modelo — un
+  // estudiante puede tener más de un acudiente recibiendo la notificación al
+  // mismo tiempo (por ejemplo, mamá y papá ambos).
+  async actualizarContactoNotificacion(
+    estudianteId: string,
+    acudienteId: string,
+    dto: ActualizarContactoAcudienteDto,
+  ) {
+    const vinculo = await this.estudianteAcudienteRepository.findOne({ where: { estudianteId, acudienteId } });
+    if (!vinculo) {
+      throw new NotFoundException('Ese acudiente no está vinculado a ese estudiante.');
+    }
+
+    vinculo.esContactoNotificacion = dto.esContactoNotificacion;
+    await this.estudianteAcudienteRepository.save(vinculo);
+    return { estudianteId, acudienteId, esContactoNotificacion: vinculo.esContactoNotificacion };
   }
 
   async matricularEstudiante(dto: MatricularEstudianteDto) {
