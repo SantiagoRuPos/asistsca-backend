@@ -9,6 +9,7 @@ import { Profesor } from '../../config/entities/academico/profesor.entity';
 import { Estado, CategoriaEstado } from '../../config/entities/catalogos/estado.entity';
 import { CrearLectorDto } from './dto/crear-lector.dto';
 import { AsignarTarjetaDto } from './dto/asignar-tarjeta.dto';
+import { CambiarTarjetaEstudianteDto } from './dto/cambiar-tarjeta-estudiante.dto';
 
 @Injectable()
 export class NfcService {
@@ -60,6 +61,13 @@ export class NfcService {
       throw new ConflictException('Ya existe una tarjeta con ese UID.');
     }
 
+    const estadoActiva = await this.estadoRepository.findOne({
+      where: { categoria: CategoriaEstado.TARJETA, codigo: 'activa' },
+    });
+    if (!estadoActiva) {
+      throw new ConflictException('No existe el estado "activa" de tarjeta en la tabla estados (falta el seed).');
+    }
+
     let estudiante: Estudiante | null = null;
     let profesor: Profesor | null = null;
 
@@ -68,7 +76,12 @@ export class NfcService {
       if (!estudiante) {
         throw new ConflictException('El estudiante indicado no existe.');
       }
-      const yaTiene = await this.tarjetaRepository.findOne({ where: { estudianteId: estudiante.id } });
+      // Solo cuenta como "ya tiene tarjeta" una tarjeta ACTIVA — si la anterior
+      // fue desactivada (ver cambiarTarjetaEstudiante), este estudiante debe
+      // poder recibir una nueva por esta misma vía.
+      const yaTiene = await this.tarjetaRepository.findOne({
+        where: { estudianteId: estudiante.id, estadoId: estadoActiva.id },
+      });
       if (yaTiene) {
         throw new ConflictException('Este estudiante ya tiene una tarjeta asignada.');
       }
@@ -77,17 +90,12 @@ export class NfcService {
       if (!profesor) {
         throw new ConflictException('El profesor indicado no existe.');
       }
-      const yaTiene = await this.tarjetaRepository.findOne({ where: { profesorId: profesor.id } });
+      const yaTiene = await this.tarjetaRepository.findOne({
+        where: { profesorId: profesor.id, estadoId: estadoActiva.id },
+      });
       if (yaTiene) {
         throw new ConflictException('Este profesor ya tiene una tarjeta asignada.');
       }
-    }
-
-    const estadoActiva = await this.estadoRepository.findOne({
-      where: { categoria: CategoriaEstado.TARJETA, codigo: 'activa' },
-    });
-    if (!estadoActiva) {
-      throw new ConflictException('No existe el estado "activa" de tarjeta en la tabla estados (falta el seed).');
     }
 
     const tarjeta = this.tarjetaRepository.create({
@@ -99,6 +107,54 @@ export class NfcService {
     });
 
     return this.tarjetaRepository.save(tarjeta);
+  }
+
+  async cambiarTarjetaEstudiante(estudianteId: string, dto: CambiarTarjetaEstudianteDto) {
+    const estudiante = await this.estudianteRepository.findOne({ where: { id: estudianteId } });
+    if (!estudiante) {
+      throw new ConflictException('El estudiante indicado no existe.');
+    }
+
+    const uidNuevo = dto.uidTarjeta.trim();
+    const duplicada = await this.tarjetaRepository.findOne({ where: { uidTarjeta: uidNuevo } });
+    if (duplicada) {
+      throw new ConflictException('Ya existe una tarjeta con ese UID.');
+    }
+
+    const estadoActiva = await this.estadoRepository.findOne({
+      where: { categoria: CategoriaEstado.TARJETA, codigo: 'activa' },
+    });
+    if (!estadoActiva) {
+      throw new ConflictException('No existe el estado "activa" de tarjeta en la tabla estados (falta el seed).');
+    }
+
+    const estadoInactiva = await this.estadoRepository.findOne({
+      where: { categoria: CategoriaEstado.TARJETA, codigo: 'inactiva' },
+    });
+    if (!estadoInactiva) {
+      throw new ConflictException('No existe el estado "inactiva" de tarjeta en la tabla estados (falta el seed).');
+    }
+
+    // Se desactiva la tarjeta anterior (se conserva como historial) y se crea
+    // una tarjeta nueva con el UID indicado, en vez de sobrescribir el UID
+    // de la tarjeta existente.
+    const tarjetaActual = await this.tarjetaRepository.findOne({
+      where: { estudianteId: estudiante.id, tipoTitular: TipoTitular.ESTUDIANTE, estadoId: estadoActiva.id },
+    });
+
+    if (tarjetaActual) {
+      tarjetaActual.estado = estadoInactiva;
+      await this.tarjetaRepository.save(tarjetaActual);
+    }
+
+    const tarjetaNueva = this.tarjetaRepository.create({
+      uidTarjeta: uidNuevo,
+      tipoTitular: TipoTitular.ESTUDIANTE,
+      estudiante,
+      estado: estadoActiva,
+    });
+
+    return this.tarjetaRepository.save(tarjetaNueva);
   }
 
   async listarTarjetas() {

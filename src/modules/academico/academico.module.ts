@@ -13,6 +13,7 @@ import { EstudianteAcudiente } from '../../config/entities/academico/estudiante-
 import { Usuario } from '../../config/entities/usuarios/usuario.entity';
 import { Rol } from '../../config/entities/usuarios/rol.entity';
 import { Estado } from '../../config/entities/catalogos/estado.entity';
+import { TarjetaNfc } from '../../config/entities/nfc/tarjeta-nfc.entity';
 import { MailerModule } from '../mailer/mailer.module';
 
 @Module({
@@ -28,6 +29,7 @@ import { MailerModule } from '../mailer/mailer.module';
       Usuario,
       Rol,
       Estado,
+      TarjetaNfc,
     ]),
     MailerModule,
   ],

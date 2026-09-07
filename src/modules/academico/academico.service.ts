@@ -15,6 +15,7 @@ import { Matricula } from '../../config/entities/academico/matricula.entity';
 import { Usuario } from '../../config/entities/usuarios/usuario.entity';
 import { Rol } from '../../config/entities/usuarios/rol.entity';
 import { Estado, CategoriaEstado } from '../../config/entities/catalogos/estado.entity';
+import { TarjetaNfc, TipoTitular } from '../../config/entities/nfc/tarjeta-nfc.entity';
 
 import { CrearProfesorDto } from './dto/crear-profesor.dto';
 import { CrearCursoDto } from './dto/crear-curso.dto';
@@ -29,6 +30,8 @@ import { RegistrarEstudianteCompletoDto } from './dto/registrar-estudiante-compl
 import { FiltrarAcudientesDto } from './dto/filtrar-acudientes.dto';
 import { ActualizarAcudienteDto } from './dto/actualizar-acudiente.dto';
 import { ActualizarContactoAcudienteDto } from './dto/actualizar-contacto-acudiente.dto';
+import { ActualizarEstudianteDto } from './dto/actualizar-estudiante.dto';
+import { CambiarCursoEstudianteDto } from './dto/cambiar-curso-estudiante.dto';
 import { ConfigService } from '@nestjs/config';
 import { AppConfig } from '../../config/configuration';
 import { MailerService } from '../mailer/mailer.service';
@@ -48,6 +51,7 @@ export class AcademicoService {
     @InjectRepository(Usuario) private readonly usuarioRepository: Repository<Usuario>,
     @InjectRepository(Rol) private readonly rolRepository: Repository<Rol>,
     @InjectRepository(Estado) private readonly estadoRepository: Repository<Estado>,
+    @InjectRepository(TarjetaNfc) private readonly tarjetaRepository: Repository<TarjetaNfc>,
     private readonly dataSource: DataSource,
     private readonly mailerService: MailerService,
     private readonly configService: ConfigService<AppConfig, true>,
@@ -209,6 +213,31 @@ export class AcademicoService {
           horaSalida: h.horaSalida,
           minutosToleranciaTardanza: h.minutosToleranciaTardanza,
         })),
+    }));
+  }
+
+  // Usado para llenar el selector de "director de grupo" al crear un curso o
+  // al cambiar el director de uno existente (antes no existía ningún
+  // endpoint para listar profesores, así que "Nuevo curso" quedaba como
+  // placeholder deshabilitado). `cursoDirigido` deja ver en el frontend qué
+  // profesores ya dirigen un curso, porque la regla de negocio (ver
+  // crearCurso/cambiarDirectorCurso) es que un profesor solo puede dirigir
+  // uno a la vez.
+  async listarProfesores() {
+    const profesores = await this.profesorRepository.find({
+      relations: ['estado', 'cursosDirigidos'],
+      order: { apellidos: 'ASC', nombres: 'ASC' },
+    });
+
+    return profesores.map((profesor) => ({
+      id: profesor.id,
+      nombres: profesor.nombres,
+      apellidos: profesor.apellidos,
+      numeroDocumento: profesor.numeroDocumento,
+      estado: { codigo: profesor.estado.codigo, nombre: profesor.estado.nombre },
+      cursoDirigido: profesor.cursosDirigidos?.[0]
+        ? { id: profesor.cursosDirigidos[0].id, nombre: profesor.cursosDirigidos[0].nombre }
+        : null,
     }));
   }
 
@@ -615,6 +644,155 @@ export class AcademicoService {
       limite,
       totalPaginas: Math.max(1, Math.ceil(total / limite)),
     };
+  }
+
+  // Detalle completo de un estudiante — usado por la pantalla Estudiantes
+  // para el ojito ("ver carnet") y el lápiz ("editar"). Junta en una sola
+  // llamada lo que antes vivía repartido (estado, curso actual, acudiente
+  // de contacto, tarjeta NFC activa) para no tener que hacer 4 peticiones
+  // distintas desde el frontend.
+  async obtenerEstudiante(id: string) {
+    const anioLectivo = new Date().getFullYear();
+
+    const estudiante = await this.estudianteRepository
+      .createQueryBuilder('estudiante')
+      .leftJoinAndSelect('estudiante.estado', 'estado')
+      .leftJoinAndSelect('estudiante.matriculas', 'matricula', 'matricula.anioLectivo = :anioLectivo', { anioLectivo })
+      .leftJoinAndSelect('matricula.curso', 'curso')
+      .leftJoinAndSelect('matricula.estado', 'estadoMatricula')
+      .leftJoinAndSelect('estudiante.acudientes', 'estudianteAcudiente')
+      .leftJoinAndSelect('estudianteAcudiente.acudiente', 'acudiente')
+      .where('estudiante.id = :id', { id })
+      .getOne();
+
+    if (!estudiante) {
+      throw new NotFoundException('El estudiante indicado no existe.');
+    }
+
+    const matriculaActiva =
+      estudiante.matriculas?.find((m) => m.estado?.codigo === 'activa') ?? estudiante.matriculas?.[0] ?? null;
+
+    const vinculoAcudiente =
+      estudiante.acudientes?.find((ea) => ea.esContactoNotificacion) ?? estudiante.acudientes?.[0] ?? null;
+
+    const estadoTarjetaActiva = await this.estadoRepository.findOne({
+      where: { categoria: CategoriaEstado.TARJETA, codigo: 'activa' },
+    });
+    const tarjeta = estadoTarjetaActiva
+      ? await this.tarjetaRepository.findOne({
+          where: { estudianteId: estudiante.id, tipoTitular: TipoTitular.ESTUDIANTE, estadoId: estadoTarjetaActiva.id },
+        })
+      : null;
+
+    return {
+      id: estudiante.id,
+      nombres: estudiante.nombres,
+      apellidos: estudiante.apellidos,
+      tipoDocumento: estudiante.tipoDocumento,
+      numeroDocumento: estudiante.numeroDocumento,
+      fechaNacimiento: estudiante.fechaNacimiento,
+      estado: { codigo: estudiante.estado.codigo, nombre: estudiante.estado.nombre },
+      curso: matriculaActiva?.curso ? { id: matriculaActiva.curso.id, nombre: matriculaActiva.curso.nombre } : null,
+      tarjeta: tarjeta ? { id: tarjeta.id, uidTarjeta: tarjeta.uidTarjeta } : null,
+      acudiente: vinculoAcudiente
+        ? {
+            id: vinculoAcudiente.acudiente.id,
+            nombres: vinculoAcudiente.acudiente.nombres,
+            apellidos: vinculoAcudiente.acudiente.apellidos,
+            parentesco: vinculoAcudiente.acudiente.parentesco,
+            telefonoWhatsapp: vinculoAcudiente.acudiente.telefonoWhatsapp,
+            email: vinculoAcudiente.acudiente.email,
+            numeroDocumento: vinculoAcudiente.acudiente.numeroDocumento,
+          }
+        : null,
+    };
+  }
+
+  async actualizarEstudiante(id: string, dto: ActualizarEstudianteDto) {
+    const estudiante = await this.estudianteRepository.findOne({ where: { id } });
+    if (!estudiante) {
+      throw new NotFoundException('El estudiante indicado no existe.');
+    }
+
+    if (dto.numeroDocumento && dto.numeroDocumento.trim() !== estudiante.numeroDocumento) {
+      const duplicado = await this.estudianteRepository.findOne({
+        where: { numeroDocumento: dto.numeroDocumento.trim() },
+      });
+      if (duplicado) {
+        throw new ConflictException('Ya existe otro estudiante con ese número de documento.');
+      }
+    }
+
+    if (dto.nombres !== undefined) estudiante.nombres = dto.nombres.trim();
+    if (dto.apellidos !== undefined) estudiante.apellidos = dto.apellidos.trim();
+    if (dto.tipoDocumento !== undefined) estudiante.tipoDocumento = dto.tipoDocumento.trim();
+    if (dto.numeroDocumento !== undefined) estudiante.numeroDocumento = dto.numeroDocumento.trim();
+    if (dto.fechaNacimiento !== undefined) estudiante.fechaNacimiento = dto.fechaNacimiento;
+
+    if (dto.estadoCodigo) {
+      const estado = await this.estadoRepository.findOne({
+        where: { categoria: CategoriaEstado.ESTUDIANTE, codigo: dto.estadoCodigo },
+      });
+      if (!estado) {
+        throw new ConflictException(`No existe el estado "${dto.estadoCodigo}" de estudiante en la tabla estados (falta el seed).`);
+      }
+      estudiante.estado = estado;
+    }
+
+    return this.estudianteRepository.save(estudiante);
+  }
+
+  // Cambiar de curso a un estudiante crea una matrícula NUEVA para el año
+  // lectivo actual y deja la anterior como historial (estado "trasladada"),
+  // en vez de reescribir el mismo registro — así queda constancia de en qué
+  // curso estuvo antes, con qué fecha se movió, y la asistencia ya registrada
+  // sigue apuntando a la matrícula/curso donde realmente ocurrió.
+  async cambiarCursoEstudiante(estudianteId: string, dto: CambiarCursoEstudianteDto) {
+    const estudiante = await this.estudianteRepository.findOne({ where: { id: estudianteId } });
+    if (!estudiante) {
+      throw new NotFoundException('El estudiante indicado no existe.');
+    }
+
+    const cursoNuevo = await this.cursoRepository.findOne({ where: { id: dto.cursoId } });
+    if (!cursoNuevo) {
+      throw new NotFoundException('El curso indicado no existe.');
+    }
+
+    const anioLectivo = new Date().getFullYear();
+
+    const estadoActiva = await this.estadoRepository.findOne({
+      where: { categoria: CategoriaEstado.MATRICULA, codigo: 'activa' },
+    });
+    if (!estadoActiva) {
+      throw new ConflictException('No existe el estado "activa" de matrícula en la tabla estados (falta el seed).');
+    }
+
+    const estadoTrasladada = await this.estadoRepository.findOne({
+      where: { categoria: CategoriaEstado.MATRICULA, codigo: 'trasladada' },
+    });
+    if (!estadoTrasladada) {
+      throw new ConflictException('No existe el estado "trasladada" de matrícula en la tabla estados (falta el seed).');
+    }
+
+    const matriculaActual = await this.matriculaRepository.findOne({
+      where: { estudianteId, anioLectivo, estadoId: estadoActiva.id },
+    });
+
+    if (matriculaActual) {
+      if (matriculaActual.cursoId === cursoNuevo.id) {
+        throw new ConflictException('El estudiante ya está matriculado en ese curso.');
+      }
+      matriculaActual.estado = estadoTrasladada;
+      await this.matriculaRepository.save(matriculaActual);
+    }
+
+    const matriculaNueva = this.matriculaRepository.create({
+      estudianteId,
+      cursoId: cursoNuevo.id,
+      anioLectivo,
+      estado: estadoActiva,
+    });
+    return this.matriculaRepository.save(matriculaNueva);
   }
 
   async listarEstudiantesActivos() {

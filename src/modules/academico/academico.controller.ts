@@ -12,6 +12,8 @@ import { ActualizarContactoAcudienteDto } from './dto/actualizar-contacto-acudie
 import { MatricularEstudianteDto } from './dto/matricular-estudiante.dto';
 import { FiltrarEstudiantesDto } from './dto/filtrar-estudiantes.dto';
 import { RegistrarEstudianteCompletoDto } from './dto/registrar-estudiante-completo.dto';
+import { ActualizarEstudianteDto } from './dto/actualizar-estudiante.dto';
+import { CambiarCursoEstudianteDto } from './dto/cambiar-curso-estudiante.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -48,6 +50,15 @@ export class AcademicoController {
   @Roles(...ROLES_LECTURA)
   listarCursos() {
     return this.academicoService.listarCursos();
+  }
+
+  // Para el selector de "director de grupo" al crear/cambiar un curso — no
+  // hace falta que lo vea un profesor, solo quien gestiona cursos.
+  @Get('profesores')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ROLES_GESTION)
+  listarProfesores() {
+    return this.academicoService.listarProfesores();
   }
 
   @Patch('cursos/:id/director')
@@ -163,5 +174,26 @@ export class AcademicoController {
   @Roles(...ROLES_GESTION)
   crearEstudiantesMasivo(@Body() body: { estudiantes: unknown[] }) {
     return this.academicoService.crearEstudiantesMasivo(body?.estudiantes ?? []);
+  }
+
+  @Get('estudiantes/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ROLES_GESTION)
+  obtenerEstudiante(@Param('id', ParseUUIDPipe) id: string) {
+    return this.academicoService.obtenerEstudiante(id);
+  }
+
+  @Patch('estudiantes/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ROLES_GESTION)
+  actualizarEstudiante(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ActualizarEstudianteDto) {
+    return this.academicoService.actualizarEstudiante(id, dto);
+  }
+
+  @Patch('estudiantes/:id/curso')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ROLES_GESTION)
+  cambiarCursoEstudiante(@Param('id', ParseUUIDPipe) id: string, @Body() dto: CambiarCursoEstudianteDto) {
+    return this.academicoService.cambiarCursoEstudiante(id, dto);
   }
 }

@@ -1,7 +1,8 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
 import { NfcService } from './nfc.service';
 import { CrearLectorDto } from './dto/crear-lector.dto';
 import { AsignarTarjetaDto } from './dto/asignar-tarjeta.dto';
+import { CambiarTarjetaEstudianteDto } from './dto/cambiar-tarjeta-estudiante.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -41,5 +42,18 @@ export class NfcController {
   @Roles('admin', 'rector', 'coordinador', 'profesor')
   listarTarjetas() {
     return this.nfcService.listarTarjetas();
+  }
+
+  // Reemplazo de carnet extraviado/dañado: desactiva la tarjeta anterior (se
+  // conserva como historial) y crea una nueva con el UID indicado. Mismos
+  // roles que la asignación original de tarjetas.
+  @Patch('tarjetas/estudiante/:estudianteId')
+  @Roles('admin', 'coordinador')
+  @Auditar('cambiar_tarjeta_estudiante', 'tarjeta_nfc')
+  cambiarTarjetaEstudiante(
+    @Param('estudianteId', ParseUUIDPipe) estudianteId: string,
+    @Body() dto: CambiarTarjetaEstudianteDto,
+  ) {
+    return this.nfcService.cambiarTarjetaEstudiante(estudianteId, dto);
   }
 }
