@@ -32,5 +32,10 @@ export class ConfigurarWhatsappDto {
   @IsOptional()
   @IsString()
   @MaxLength(10)
-  idiomaPlantilla?: string;
+  idiomaPlantillaEntrada?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  idiomaPlantillaSalida?: string;
 }

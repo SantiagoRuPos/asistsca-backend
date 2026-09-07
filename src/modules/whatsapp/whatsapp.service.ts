@@ -49,6 +49,11 @@ export class WhatsappService {
       const tipoMensaje = evento.tipoEvento === TipoEvento.ENTRADA ? 'entrada' : 'salida';
       const nombrePlantilla =
         evento.tipoEvento === TipoEvento.ENTRADA ? configuracion.plantillaEntrada : configuracion.plantillaSalida;
+      // Cada plantilla puede quedar aprobada en Meta con su propio idioma
+      // (ver ConfiguracionWhatsapp.idiomaPlantillaEntrada/idiomaPlantillaSalida) —
+      // ya no se asume que las dos comparten el mismo.
+      const idiomaPlantilla =
+        evento.tipoEvento === TipoEvento.ENTRADA ? configuracion.idiomaPlantillaEntrada : configuracion.idiomaPlantillaSalida;
       const fecha = evento.timestampEvento.toLocaleDateString('es-CO', {
         timeZone: 'America/Bogota',
         day: 'numeric',
@@ -71,7 +76,7 @@ export class WhatsappService {
           telefono: contacto.acudiente.telefonoWhatsapp,
           tipoMensaje,
           nombrePlantilla,
-          idioma: configuracion.idiomaPlantilla,
+          idioma: idiomaPlantilla,
           parametros: [nombreAcudiente, nombreEstudiante, nombreColegio, fecha, hora],
           configuracion,
           origenEventoId: evento.id,

@@ -75,7 +75,8 @@ export class WhatsappConfigService {
         apiVersion: dto.apiVersion ?? 'v21.0',
         plantillaEntrada: dto.plantillaEntrada ?? 'hello_world',
         plantillaSalida: dto.plantillaSalida ?? 'hello_world',
-        idiomaPlantilla: dto.idiomaPlantilla ?? 'en_US',
+        idiomaPlantillaEntrada: dto.idiomaPlantillaEntrada ?? 'es_CO',
+        idiomaPlantillaSalida: dto.idiomaPlantillaSalida ?? 'es_CO',
         actualizadoPorUsuarioId: usuarioId,
       });
     } else {
@@ -85,7 +86,8 @@ export class WhatsappConfigService {
       if (dto.apiVersion) configuracion.apiVersion = dto.apiVersion;
       if (dto.plantillaEntrada) configuracion.plantillaEntrada = dto.plantillaEntrada;
       if (dto.plantillaSalida) configuracion.plantillaSalida = dto.plantillaSalida;
-      if (dto.idiomaPlantilla) configuracion.idiomaPlantilla = dto.idiomaPlantilla;
+      if (dto.idiomaPlantillaEntrada) configuracion.idiomaPlantillaEntrada = dto.idiomaPlantillaEntrada;
+      if (dto.idiomaPlantillaSalida) configuracion.idiomaPlantillaSalida = dto.idiomaPlantillaSalida;
       configuracion.actualizadoPorUsuarioId = usuarioId;
     }
 

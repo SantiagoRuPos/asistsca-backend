@@ -29,8 +29,18 @@ export class ConfiguracionWhatsapp {
   @Column({ name: 'plantilla_salida', length: 120, default: 'hello_world' })
   plantillaSalida!: string;
 
-  @Column({ name: 'idioma_plantilla', length: 10, default: 'en_US' })
-  idiomaPlantilla!: string;
+  // Antes había una sola columna 'idioma_plantilla' compartida entre las dos
+  // plantillas. Se separó en dos (2026-09-07) porque en la práctica cada
+  // plantilla se aprueba en Meta con su propio idioma de forma independiente
+  // (el usuario terminó con "entrada" en Spanish (COL) y "salida" en English
+  // por accidente, y Meta no deja cambiar el idioma de una plantilla activa
+  // sin esperar su ventana de reaprobación) — cada una necesita poder tener
+  // el suyo sin depender de que coincidan.
+  @Column({ name: 'idioma_plantilla_entrada', length: 10, default: 'es_CO' })
+  idiomaPlantillaEntrada!: string;
+
+  @Column({ name: 'idioma_plantilla_salida', length: 10, default: 'es_CO' })
+  idiomaPlantillaSalida!: string;
 
   @Column({ name: 'actualizado_por_usuario_id' })
   actualizadoPorUsuarioId!: string;

@@ -68,15 +68,25 @@ export class AsistenciaService {
     }
 
     const ahora = new Date();
-    const inicioDelDia = new Date();
-    inicioDelDia.setHours(0, 0, 0, 0);
 
     const ultimoEvento = await this.eventoRepository.findOne({
       where: { tarjetaId: tarjeta.id },
       order: { timestampEvento: 'DESC' },
     });
 
-    const esMismoDia = ultimoEvento && ultimoEvento.timestampEvento >= inicioDelDia;
+    // Corrección (2026-09-07): antes se comparaba ultimoEvento.timestampEvento
+    // contra "new Date().setHours(0,0,0,0)", que calcula la medianoche en la
+    // zona horaria del propio proceso de Node (normalmente UTC en el
+    // servidor), no en la de Bogotá. Bogotá es UTC-5, así que la medianoche
+    // UTC cae 5 horas antes que la medianoche real de Bogotá: cualquier
+    // "entrada" registrada entre la medianoche de Bogotá y las 7:00 p.m.
+    // (cuando de verdad cambia el día en UTC) dejaba de contar como "del
+    // mismo día" mucho antes de que en Bogotá cambiara de fecha, y el
+    // sistema volvía a marcar "entrada" en vez de "salida" al pasar la
+    // tarjeta otra vez esa misma noche. Se compara la fecha calendario en
+    // Bogotá de los dos eventos, igual que ya hace el resto de este
+    // servicio (ver obtenerFechaBogota, usado en toda la clase).
+    const esMismoDia = !!ultimoEvento && this.obtenerFechaBogota(ultimoEvento.timestampEvento) === this.obtenerFechaBogota(ahora);
     const tipoEvento =
       esMismoDia && ultimoEvento!.tipoEvento === TipoEvento.ENTRADA ? TipoEvento.SALIDA : TipoEvento.ENTRADA;
 
