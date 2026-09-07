@@ -6,6 +6,7 @@ import { EstudianteAcudiente } from '../../config/entities/academico/estudiante-
 import { Estado, CategoriaEstado } from '../../config/entities/catalogos/estado.entity';
 import { EventoAsistencia, TipoEvento } from '../../config/entities/nfc/evento-asistencia.entity';
 import { WhatsappConfigService } from './whatsapp-config.service';
+import { Colegio } from '../../config/entities/colegio/colegio.entity';
 
 @Injectable()
 export class WhatsappService {
@@ -18,6 +19,8 @@ export class WhatsappService {
     private readonly estudianteAcudienteRepository: Repository<EstudianteAcudiente>,
     @InjectRepository(Estado)
     private readonly estadoRepository: Repository<Estado>,
+    @InjectRepository(Colegio)
+    private readonly colegioRepository: Repository<Colegio>,
     private readonly whatsappConfigService: WhatsappConfigService,
   ) {}
 
@@ -31,13 +34,27 @@ export class WhatsappService {
 
       const contactos = await this.estudianteAcudienteRepository.find({
         where: { estudianteId, esContactoNotificacion: true },
-        relations: ['acudiente'],
+        relations: ['acudiente', 'estudiante'],
       });
       if (contactos.length === 0) return;
+
+      // Plantillas de Meta actualizadas (2026-09-07): ambas (entrada y salida)
+      // ahora piden 5 variables en el mismo orden — {{1}} acudiente,
+      // {{2}} estudiante, {{3}} colegio, {{4}} fecha, {{5}} hora — el texto
+      // fijo ("...su entrada a..."/"...su salida de...") ya está en la
+      // plantilla aprobada en Meta, aquí solo se arma el arreglo de valores.
+      const colegio = await this.colegioRepository.find({ take: 1 });
+      const nombreColegio = colegio[0]?.nombre ?? 'AsistSCA';
 
       const tipoMensaje = evento.tipoEvento === TipoEvento.ENTRADA ? 'entrada' : 'salida';
       const nombrePlantilla =
         evento.tipoEvento === TipoEvento.ENTRADA ? configuracion.plantillaEntrada : configuracion.plantillaSalida;
+      const fecha = evento.timestampEvento.toLocaleDateString('es-CO', {
+        timeZone: 'America/Bogota',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      });
       const hora = evento.timestampEvento.toLocaleTimeString('es-CO', {
         timeZone: 'America/Bogota',
         hour: '2-digit',
@@ -45,6 +62,9 @@ export class WhatsappService {
       });
 
       for (const contacto of contactos) {
+        const nombreAcudiente = `${contacto.acudiente.nombres} ${contacto.acudiente.apellidos}`;
+        const nombreEstudiante = `${contacto.estudiante.nombres} ${contacto.estudiante.apellidos}`;
+
         await this.enviarYRegistrar({
           estudianteId,
           acudienteId: contacto.acudienteId,
@@ -52,7 +72,7 @@ export class WhatsappService {
           tipoMensaje,
           nombrePlantilla,
           idioma: configuracion.idiomaPlantilla,
-          parametros: [hora],
+          parametros: [nombreAcudiente, nombreEstudiante, nombreColegio, fecha, hora],
           configuracion,
           origenEventoId: evento.id,
         });
