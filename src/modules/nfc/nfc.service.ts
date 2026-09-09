@@ -1,15 +1,21 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { MoreThanOrEqual, Repository } from 'typeorm';
 import { randomBytes, createHash } from 'crypto';
 import { LectorNfc } from '../../config/entities/nfc/lector-nfc.entity';
 import { TarjetaNfc, TipoTitular } from '../../config/entities/nfc/tarjeta-nfc.entity';
+import { TarjetaDesconocida } from '../../config/entities/nfc/tarjeta-desconocida.entity';
 import { Estudiante } from '../../config/entities/academico/estudiante.entity';
 import { Profesor } from '../../config/entities/academico/profesor.entity';
 import { Estado, CategoriaEstado } from '../../config/entities/catalogos/estado.entity';
 import { CrearLectorDto } from './dto/crear-lector.dto';
 import { AsignarTarjetaDto } from './dto/asignar-tarjeta.dto';
 import { CambiarTarjetaEstudianteDto } from './dto/cambiar-tarjeta-estudiante.dto';
+
+// Ventana de "recién escaneada": una tarjeta desconocida solo se ofrece en el
+// formulario de asignar carnet si se escaneó hace menos de esto — pasado ese
+// tiempo se asume que ya no está frente al lector.
+const VENTANA_TARJETA_DESCONOCIDA_MS = 2 * 60 * 1000;
 
 @Injectable()
 export class NfcService {
@@ -19,6 +25,7 @@ export class NfcService {
     @InjectRepository(Estudiante) private readonly estudianteRepository: Repository<Estudiante>,
     @InjectRepository(Profesor) private readonly profesorRepository: Repository<Profesor>,
     @InjectRepository(Estado) private readonly estadoRepository: Repository<Estado>,
+    @InjectRepository(TarjetaDesconocida) private readonly tarjetaDesconocidaRepository: Repository<TarjetaDesconocida>,
   ) {}
 
   async crearLector(dto: CrearLectorDto) {
@@ -106,7 +113,9 @@ export class NfcService {
       estado: estadoActiva,
     });
 
-    return this.tarjetaRepository.save(tarjeta);
+    const guardada = await this.tarjetaRepository.save(tarjeta);
+    await this.marcarTarjetaDesconocidaResuelta(dto.uidTarjeta.trim());
+    return guardada;
   }
 
   async cambiarTarjetaEstudiante(estudianteId: string, dto: CambiarTarjetaEstudianteDto) {
@@ -154,7 +163,9 @@ export class NfcService {
       estado: estadoActiva,
     });
 
-    return this.tarjetaRepository.save(tarjetaNueva);
+    const guardada = await this.tarjetaRepository.save(tarjetaNueva);
+    await this.marcarTarjetaDesconocidaResuelta(uidNuevo);
+    return guardada;
   }
 
   async listarTarjetas() {
@@ -162,5 +173,37 @@ export class NfcService {
       relations: ['estudiante', 'profesor', 'estado'],
       order: { fechaAsignacion: 'DESC' },
     });
+  }
+
+  // Última tarjeta escaneada por el lector que no corresponde a ningún
+  // carnet asignado, dentro de la ventana de "recién escaneada" y que
+  // todavía no se haya usado para asignar/cambiar un carnet. Pensado para
+  // el formulario "Asignar carnet" de la pantalla Carnets: el frontend lo
+  // consulta por refresco periódico (polling) mientras el formulario está
+  // abierto, y ofrece usar ese UID en vez de que alguien tenga que
+  // copiarlo a mano de la tarjeta física.
+  async obtenerUltimaTarjetaDesconocida() {
+    const desde = new Date(Date.now() - VENTANA_TARJETA_DESCONOCIDA_MS);
+    const registro = await this.tarjetaDesconocidaRepository.findOne({
+      where: { resuelta: false, fechaEscaneo: MoreThanOrEqual(desde) },
+      order: { fechaEscaneo: 'DESC' },
+      relations: ['lector'],
+    });
+
+    if (!registro) {
+      return null;
+    }
+
+    return {
+      uidTarjeta: registro.uidTarjeta,
+      fechaEscaneo: registro.fechaEscaneo,
+      lector: registro.lector
+        ? { id: registro.lector.id, nombre: registro.lector.nombre, codigoLector: registro.lector.codigoLector }
+        : null,
+    };
+  }
+
+  private async marcarTarjetaDesconocidaResuelta(uidTarjeta: string): Promise<void> {
+    await this.tarjetaDesconocidaRepository.update({ uidTarjeta, resuelta: false }, { resuelta: true });
   }
 }

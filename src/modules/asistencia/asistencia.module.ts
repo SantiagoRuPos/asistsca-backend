@@ -9,6 +9,7 @@ import { ExcusasService } from './excusas.service';
 import { AutorizacionesSalidaService } from './autorizaciones-salida.service';
 import { EventoAsistencia } from '../../config/entities/nfc/evento-asistencia.entity';
 import { TarjetaNfc } from '../../config/entities/nfc/tarjeta-nfc.entity';
+import { TarjetaDesconocida } from '../../config/entities/nfc/tarjeta-desconocida.entity';
 import { LectorNfc } from '../../config/entities/nfc/lector-nfc.entity';
 import { AsistenciaDiaria } from '../../config/entities/asistencia/asistencia-diaria.entity';
 import { Excusa } from '../../config/entities/asistencia/excusa.entity';
@@ -28,6 +29,7 @@ import { TelegramApiModule } from '../../telegram_bot/telegram-api.module';
     TypeOrmModule.forFeature([
       EventoAsistencia,
       TarjetaNfc,
+      TarjetaDesconocida,
       LectorNfc,
       AsistenciaDiaria,
       Excusa,

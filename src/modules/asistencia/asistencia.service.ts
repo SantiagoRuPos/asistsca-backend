@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { EventoAsistencia, TipoEvento } from '../../config/entities/nfc/evento-asistencia.entity';
 import { TarjetaNfc, TipoTitular } from '../../config/entities/nfc/tarjeta-nfc.entity';
+import { TarjetaDesconocida } from '../../config/entities/nfc/tarjeta-desconocida.entity';
 import { LectorNfc } from '../../config/entities/nfc/lector-nfc.entity';
 import { AsistenciaDiaria, OrigenAsistencia } from '../../config/entities/asistencia/asistencia-diaria.entity';
 import { Matricula } from '../../config/entities/academico/matricula.entity';
@@ -24,6 +25,7 @@ export class AsistenciaService {
   constructor(
     @InjectRepository(EventoAsistencia) private readonly eventoRepository: Repository<EventoAsistencia>,
     @InjectRepository(TarjetaNfc) private readonly tarjetaRepository: Repository<TarjetaNfc>,
+    @InjectRepository(TarjetaDesconocida) private readonly tarjetaDesconocidaRepository: Repository<TarjetaDesconocida>,
     @InjectRepository(AsistenciaDiaria) private readonly asistenciaDiariaRepository: Repository<AsistenciaDiaria>,
     @InjectRepository(Matricula) private readonly matriculaRepository: Repository<Matricula>,
     @InjectRepository(HorarioCurso) private readonly horarioCursoRepository: Repository<HorarioCurso>,
@@ -60,6 +62,13 @@ export class AsistenciaService {
   async registrarEvento(dto: RegistrarEventoDto, lector: LectorNfc) {
     const tarjeta = await this.tarjetaRepository.findOne({ where: { uidTarjeta: dto.id_tarjeta } });
     if (!tarjeta) {
+      // No se cambia la respuesta que recibe el ESP32 (sigue siendo el mismo
+      // 404 de siempre, sin tocar el firmware) — solo se deja un registro
+      // para que la pantalla Carnets pueda ofrecer este UID al asignar un
+      // carnet nuevo, en vez de tener que copiarlo a mano de la tarjeta física.
+      await this.tarjetaDesconocidaRepository.save(
+        this.tarjetaDesconocidaRepository.create({ uidTarjeta: dto.id_tarjeta, lectorId: lector.id }),
+      );
       throw new NotFoundException('Tarjeta no reconocida.');
     }
 

@@ -56,4 +56,13 @@ export class NfcController {
   ) {
     return this.nfcService.cambiarTarjetaEstudiante(estudianteId, dto);
   }
+
+  // Para el formulario "Asignar carnet": mismos roles que pueden asignar,
+  // así el frontend puede ofrecer el UID recién escaneado sin que alguien
+  // tenga que copiarlo a mano.
+  @Get('tarjetas/desconocidas/ultima')
+  @Roles('admin', 'coordinador')
+  obtenerUltimaTarjetaDesconocida() {
+    return this.nfcService.obtenerUltimaTarjetaDesconocida();
+  }
 }
