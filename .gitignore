@@ -49,6 +49,16 @@ lerna-debug.log*
 # Archivos subidos por usuarios (adjuntos de excusas, etc.)
 /uploads
 
+# Licenciamiento: el token firmado es especifico de cada cliente y NUNCA se
+# sube a control de versiones (igual que el .env). La llave PUBLICA
+# (public-key.pem) si se sube a proposito: no es secreta, es lo que este
+# backend usa para verificar tokens, y sin ella nadie mas podria ni siquiera
+# clonar el repo y correr el proyecto.
+storage/licencia/license.jwt
+storage/licencia/*.jwt
+storage/licencia/*private*
+storage/licencia-dev/
+
 # Runtime data
 pids
 *.pid
