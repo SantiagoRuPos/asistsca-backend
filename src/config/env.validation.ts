@@ -106,6 +106,35 @@ class EnvironmentVariables {
   @IsOptional()
   @IsString()
   BRAND_NAME!: string;
+
+  // --- Licenciamiento comercial (Fase 1) ---
+  // Todas opcionales: si no se completan, configuration.ts usa los valores
+  // por defecto (storage/licencia/... y 15+7 días de gracia) para que el
+  // arranque nunca se rompa por esto — sin token cargado, el estado
+  // simplemente empieza en 'aviso' contando desde el primer arranque.
+  @IsOptional()
+  @IsString()
+  LICENCIA_PUBLIC_KEY_PATH!: string;
+
+  @IsOptional()
+  @IsString()
+  LICENCIA_TOKEN_PATH!: string;
+
+  @IsOptional()
+  @IsString()
+  LICENCIA_SERVIDOR_URL!: string;
+
+  @IsOptional()
+  @IsNumberString()
+  LICENCIA_DIAS_AVISO!: string;
+
+  @IsOptional()
+  @IsNumberString()
+  LICENCIA_DIAS_DEGRADACION_ADICIONAL!: string;
+
+  @IsOptional()
+  @IsNumberString()
+  LICENCIA_DIAS_GRACIA_PRIMERA_ACTIVACION!: string;
 }
 
 export function validateEnv(config: Record<string, unknown>) {

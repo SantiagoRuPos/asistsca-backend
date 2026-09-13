@@ -40,6 +40,20 @@ export interface AppConfig {
     name: string;
   };
   corsOrigins: string[];
+  licencia: {
+    // Rutas relativas a process.cwd() (raíz del backend en ejecución).
+    publicKeyPath: string;
+    tokenPath: string;
+    // Placeholder — el servidor de licencias real (Fase 2) todavía no existe.
+    servidorUrl: string;
+    diasAviso: number;
+    diasDegradacionAdicional: number;
+    // Gracia corta para una instalación que JAMÁS ha validado una licencia
+    // (nueva, o alguien con un token falso/copiado de otro servidor) — no
+    // debe recibir el mismo colchón de 22 días que un cliente real cuya
+    // renovación falló. Ver LicenciaTokenService.calcularEstadoDeGracia.
+    diasGraciaPrimeraActivacion: number;
+  };
 }
 
 
@@ -92,4 +106,13 @@ export default (): AppConfig => ({
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean),
+
+  licencia: {
+    publicKeyPath: process.env.LICENCIA_PUBLIC_KEY_PATH ?? 'storage/licencia/public-key.pem',
+    tokenPath: process.env.LICENCIA_TOKEN_PATH ?? 'storage/licencia/license.jwt',
+    servidorUrl: process.env.LICENCIA_SERVIDOR_URL ?? 'https://licencias.scasolutions.com.co/api/renovar',
+    diasAviso: parseInt(process.env.LICENCIA_DIAS_AVISO ?? '15', 10),
+    diasDegradacionAdicional: parseInt(process.env.LICENCIA_DIAS_DEGRADACION_ADICIONAL ?? '7', 10),
+    diasGraciaPrimeraActivacion: parseInt(process.env.LICENCIA_DIAS_GRACIA_PRIMERA_ACTIVACION ?? '3', 10),
+  },
 });
