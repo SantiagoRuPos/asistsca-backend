@@ -689,12 +689,19 @@ Observación: ${registro.observacionVerificacion ?? '(sin observación)'}
 Por favor verifica esta acción. ¿Deseas que lo reporte al coordinador?
       `.trim();
 
+      // callback_data de Telegram tiene un límite duro de 64 bytes — dos
+      // UUID completos (36 caracteres cada uno) más el prefijo se pasaban
+      // de largo (89 caracteres) y Telegram rechazaba el mensaje COMPLETO
+      // con 400 "BUTTON_DATA_INVALID" (bug real encontrado 2026-09-22: el
+      // aviso nunca llegaba, ni siquiera el texto). Solo hace falta el id
+      // del registro de asistencia_diaria (compacto, sin guiones, 32
+      // caracteres) — el estudianteId se deriva de ahí mismo al escalar.
       const replyMarkup = {
         inline_keyboard: [
           [
             {
               text: '📣 Sí, reportar al coordinador',
-              callback_data: `evadido_escalar:${estudiante.id}:${registro.id}`,
+              callback_data: `evadido_escalar:${registro.id.replace(/-/g, '')}`,
             },
           ],
         ],
@@ -752,12 +759,11 @@ Observación: ${registro.observacionVerificacion ?? '(sin observación)'}
    * disparar este callback.
    */
   async escalarEvadidoACoordinador(
-    estudianteId: string,
     asistenciaDiariaId: string,
     solicitanteUsuarioId: string,
   ): Promise<{ ok: boolean; razon?: 'ya_escalado' | 'no_aplica' | 'no_autorizado' }> {
     const registro = await this.asistenciaDiariaRepository.findOne({
-      where: { id: asistenciaDiariaId, estudianteId },
+      where: { id: asistenciaDiariaId },
       relations: ['estado'],
     });
 
@@ -768,6 +774,8 @@ Observación: ${registro.observacionVerificacion ?? '(sin observación)'}
     if (registro.evadidoEscaladoCoordinador) {
       return { ok: false, razon: 'ya_escalado' };
     }
+
+    const estudianteId = registro.estudianteId;
 
     const anioLectivo = new Date().getFullYear();
     const matricula = await this.matriculaRepository.findOne({

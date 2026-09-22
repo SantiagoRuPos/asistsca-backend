@@ -229,18 +229,14 @@ Comparte tu número de teléfono con el botón de abajo (debe ser el mismo que e
       return;
     }
 
-    const [accion, estudianteId, asistenciaDiariaId] = data.split(':');
+    const [accion, asistenciaDiariaId] = data.split(':');
 
-    if (accion !== 'evadido_escalar' || !estudianteId || !asistenciaDiariaId) {
+    if (accion !== 'evadido_escalar' || !asistenciaDiariaId) {
       await this.telegramApiService.responderCallback(callbackId);
       return;
     }
 
-    const resultado = await this.asistenciaService.escalarEvadidoACoordinador(
-      estudianteId,
-      asistenciaDiariaId,
-      usuario.id,
-    );
+    const resultado = await this.asistenciaService.escalarEvadidoACoordinador(asistenciaDiariaId, usuario.id);
 
     if (resultado.razon === 'no_autorizado') {
       await this.telegramApiService.responderCallback(
