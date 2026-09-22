@@ -18,6 +18,7 @@ import { Matricula } from '../../config/entities/academico/matricula.entity';
 import { HorarioCurso } from '../../config/entities/academico/horario-curso.entity';
 import { Curso } from '../../config/entities/academico/curso.entity';
 import { Estudiante } from '../../config/entities/academico/estudiante.entity';
+import { Profesor } from '../../config/entities/academico/profesor.entity';
 import { Acudiente } from '../../config/entities/academico/acudiente.entity';
 import { Usuario } from '../../config/entities/usuarios/usuario.entity';
 import { Estado } from '../../config/entities/catalogos/estado.entity';
@@ -38,6 +39,7 @@ import { TelegramApiModule } from '../../telegram_bot/telegram-api.module';
       HorarioCurso,
       Curso,
       Estudiante,
+      Profesor,
       Acudiente,
       Usuario,
       Estado,

@@ -69,4 +69,12 @@ export class AsistenciaDiaria {
 
   @Column({ name: 'observacion_verificacion', type: 'text', nullable: true })
   observacionVerificacion!: string | null;
+
+  // 2026-09-22: marca si el evadido de este registro ya fue escalado al
+  // coordinador desde Telegram (botón "Sí, reportar al coordinador" que
+  // ve el director de grupo) — evita notificar dos veces al coordinador
+  // si el botón se presiona más de una vez. Solo aplica cuando el estado
+  // es "evadido"; en cualquier otro caso queda en false sin significado.
+  @Column({ name: 'evadido_escalado_coordinador', default: false })
+  evadidoEscaladoCoordinador!: boolean;
 }

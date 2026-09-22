@@ -39,4 +39,45 @@ export class TelegramApiService {
       throw error;
     }
   }
+
+  /**
+   * Responde a un tap sobre un botón inline (answerCallbackQuery) — hace
+   * que Telegram deje de mostrar el reloj de "cargando" sobre el botón.
+   * `texto` es opcional y aparece como un toast pequeño (o una alerta
+   * bloqueante si `mostrarAlerta` es true); Telegram exige responder a
+   * todo callback_query en un plazo corto, así que esto nunca lanza el
+   * error hacia arriba — un fallo aquí no debe tumbar el procesamiento
+   * del webhook.
+   */
+  async responderCallback(callbackQueryId: string, texto?: string, mostrarAlerta = false) {
+    try {
+      await axios.post(`${this.baseUrl}/answerCallbackQuery`, {
+        callback_query_id: callbackQueryId,
+        ...(texto ? { text: texto } : {}),
+        show_alert: mostrarAlerta,
+      });
+    } catch (error) {
+      this.logger.error(`Error respondiendo al callback ${callbackQueryId}`, error);
+    }
+  }
+
+  /**
+   * Quita el teclado inline de un mensaje ya enviado (por ejemplo, el
+   * botón "Sí, reportar al coordinador" una vez que ya se usó), para que
+   * no se pueda volver a presionar por accidente. Best-effort: si falla,
+   * el botón se queda visible pero el registro ya quedó marcado como
+   * escalado en la base de datos, así que un segundo intento no duplica
+   * la notificación al coordinador.
+   */
+  async quitarBotones(chatId: number | string, messageId: number) {
+    try {
+      await axios.post(`${this.baseUrl}/editMessageReplyMarkup`, {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: { inline_keyboard: [] },
+      });
+    } catch (error) {
+      this.logger.error(`Error quitando los botones del mensaje ${messageId} en el chat ${chatId}`, error);
+    }
+  }
 }

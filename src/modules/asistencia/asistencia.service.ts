@@ -9,6 +9,7 @@ import { AsistenciaDiaria, OrigenAsistencia } from '../../config/entities/asiste
 import { Matricula } from '../../config/entities/academico/matricula.entity';
 import { HorarioCurso } from '../../config/entities/academico/horario-curso.entity';
 import { Estudiante } from '../../config/entities/academico/estudiante.entity';
+import { Profesor } from '../../config/entities/academico/profesor.entity';
 import { Curso } from '../../config/entities/academico/curso.entity';
 import { Usuario } from '../../config/entities/usuarios/usuario.entity';
 import { Estado, CategoriaEstado } from '../../config/entities/catalogos/estado.entity';
@@ -30,6 +31,7 @@ export class AsistenciaService {
     @InjectRepository(Matricula) private readonly matriculaRepository: Repository<Matricula>,
     @InjectRepository(HorarioCurso) private readonly horarioCursoRepository: Repository<HorarioCurso>,
     @InjectRepository(Estudiante) private readonly estudianteRepository: Repository<Estudiante>,
+    @InjectRepository(Profesor) private readonly profesorRepository: Repository<Profesor>,
     @InjectRepository(Curso) private readonly cursoRepository: Repository<Curso>,
     @InjectRepository(Usuario) private readonly usuarioRepository: Repository<Usuario>,
     @InjectRepository(Estado) private readonly estadoRepository: Repository<Estado>,
@@ -60,7 +62,10 @@ export class AsistenciaService {
   }
 
   async registrarEvento(dto: RegistrarEventoDto, lector: LectorNfc) {
-    const tarjeta = await this.tarjetaRepository.findOne({ where: { uidTarjeta: dto.id_tarjeta } });
+    const tarjeta = await this.tarjetaRepository.findOne({
+      where: { uidTarjeta: dto.id_tarjeta },
+      relations: ['estado'],
+    });
     if (!tarjeta) {
       // No se cambia la respuesta que recibe el ESP32 (sigue siendo el mismo
       // 404 de siempre, sin tocar el firmware) — solo se deja un registro
@@ -76,12 +81,66 @@ export class AsistenciaService {
       throw new NotFoundException('El id_lector no coincide con la api key usada.');
     }
 
+    // Bloqueo de carnet o de su titular (2026-09-22): un carnet reportado
+    // como perdido/dañado, o un estudiante/profesor suspendido, se
+    // desactivan poniendo su estado en algo distinto de "activa"/"activo"
+    // — nunca borrando la fila (se necesita conservar el historial). El
+    // ESP32 ya sabe reproducir el sonido de "rechazado" ante cualquier
+    // 403 (ver enviarEvento() en el firmware), así que basta con
+    // rechazar aquí: no hizo falta tocar el firmware para este punto.
+    if (tarjeta.estado?.codigo !== 'activa') {
+      throw new ForbiddenException('El carnet está inactivo o bloqueado.');
+    }
+
+    let titularBloqueado = false;
+    if (tarjeta.tipoTitular === TipoTitular.ESTUDIANTE && tarjeta.estudianteId) {
+      const estudiante = await this.estudianteRepository.findOne({
+        where: { id: tarjeta.estudianteId },
+        relations: ['estado'],
+      });
+      titularBloqueado = !estudiante || estudiante.estado?.codigo !== 'activo';
+    } else if (tarjeta.tipoTitular === TipoTitular.PROFESOR && tarjeta.profesorId) {
+      const profesor = await this.profesorRepository.findOne({
+        where: { id: tarjeta.profesorId },
+        relations: ['estado'],
+      });
+      titularBloqueado = !profesor || profesor.estado?.codigo !== 'activo';
+    }
+
+    if (titularBloqueado) {
+      throw new ForbiddenException('El titular de este carnet está inactivo.');
+    }
+
     const ahora = new Date();
 
     const ultimoEvento = await this.eventoRepository.findOne({
       where: { tarjetaId: tarjeta.id },
       order: { timestampEvento: 'DESC' },
     });
+
+    // Ventana anti-duplicado (2026-09-22): si la última lectura de esta
+    // misma tarjeta fue una ENTRADA hace menos de 15 minutos, esta nueva
+    // lectura se trata como un reintento de esa misma entrada (por
+    // ejemplo, el estudiante volvió a acercar el carnet porque no vio la
+    // luz verde) y NO se registra como salida — sin esto, cualquier doble
+    // lectura accidental marcaba salida minutos después de la entrada
+    // real. No se crea un evento nuevo ni se toca asistencia_diaria; el
+    // lector igual queda en verde/aceptado (HTTP 201) porque la tarjeta
+    // sigue siendo válida.
+    const VENTANA_ANTI_DUPLICADO_MS = 15 * 60 * 1000;
+    const esReintentoDeEntrada =
+      !!ultimoEvento &&
+      ultimoEvento.tipoEvento === TipoEvento.ENTRADA &&
+      ahora.getTime() - ultimoEvento.timestampEvento.getTime() < VENTANA_ANTI_DUPLICADO_MS;
+
+    if (esReintentoDeEntrada) {
+      return {
+        evento: ultimoEvento!.id,
+        tipoEvento: ultimoEvento!.tipoEvento,
+        timestamp: ultimoEvento!.timestampEvento,
+        duplicado: true,
+      };
+    }
 
     // Corrección (2026-09-07): antes se comparaba ultimoEvento.timestampEvento
     // contra "new Date().setHours(0,0,0,0)", que calcula la medianoche en la
@@ -564,7 +623,7 @@ export class AsistenciaService {
       // Best-effort: si Telegram falla, la marca de evadido ya quedó
       // guardada — solo se registra el error en el log, nunca se revierte
       // ni se le muestra un error al profesor por esto.
-      this.notificarEvadido(estudiante, guardado).catch((error) => {
+      this.notificarEvadido(estudiante, guardado, usuarioId).catch((error) => {
         this.logger.error(`No se pudo notificar por Telegram el evadido del estudiante ${estudiante.id}`, error);
       });
     }
@@ -573,15 +632,27 @@ export class AsistenciaService {
   }
 
   /**
-   * Notifica por Telegram (a través del bot) a todo el personal que debe
-   * enterarse de que un estudiante fue marcado como evadido: rector,
-   * coordinador(es) y el profesor director de grupo del curso actual del
-   * estudiante. Solo llegan al usuario que ya vinculó su cuenta de Telegram
+   * Notifica por Telegram cuando un estudiante es marcado como evadido.
+   * Decisión de negocio (confirmada 2026-09-22): el rector ya NO forma
+   * parte de este flujo automático. Solo se avisa al director de grupo
+   * del curso actual del estudiante, con un botón para que él mismo
+   * decida si hace falta escalarlo al coordinador — así no se satura a
+   * coordinación con casos que el director de grupo puede resolver
+   * verificando él mismo (por ejemplo, el estudiante estaba en otro salón
+   * autorizado). Si no hay director de grupo asignado al curso, o el que
+   * hay no ha vinculado su Telegram (o está inactivo), se avisa
+   * directamente al coordinador como respaldo, dejando explícito en el
+   * mensaje que no se pudo verificar primero con el director de grupo.
+   * Solo llegan al usuario que ya vinculó su cuenta de Telegram
    * (telegramChatId no nulo) — a nadie más se le puede escribir por este
    * medio. No lanza errores hacia quien la llama: cualquier fallo queda
    * únicamente en el log.
    */
-  private async notificarEvadido(estudiante: Estudiante, registro: AsistenciaDiaria): Promise<void> {
+  private async notificarEvadido(
+    estudiante: Estudiante,
+    registro: AsistenciaDiaria,
+    marcadoPorUsuarioId: string,
+  ): Promise<void> {
     const anioLectivo = new Date().getFullYear();
 
     const matricula = await this.matriculaRepository.findOne({
@@ -589,55 +660,176 @@ export class AsistenciaService {
       relations: ['curso', 'curso.profesorDirector'],
     });
 
-    const destinatarios = await this.usuarioRepository
+    const marcadoPor = await this.usuarioRepository.findOne({ where: { id: marcadoPorUsuarioId } });
+    const nombreQuienMarco = marcadoPor?.nombreCompleto ?? 'un profesor';
+
+    const horaEntradaTexto = registro.horaEntrada ? this.formatearHoraBogota(registro.horaEntrada) : 'desconocida';
+    const cursoNombre = matricula?.curso?.nombre ?? 'sin curso asignado';
+
+    let director: Usuario | null = null;
+    if (matricula?.curso?.profesorDirector) {
+      director = await this.usuarioRepository.findOne({
+        where: { profesorId: matricula.curso.profesorDirector.id },
+        relations: ['estado'],
+      });
+    }
+
+    const directorDisponible = !!(director && director.estado?.codigo === 'activo' && director.telegramChatId);
+
+    if (directorDisponible) {
+      const mensaje = `
+🚪 Estudiante evadido — verifícalo
+
+Hola profesor(a) ${director!.nombreCompleto}, tu estudiante ${estudiante.nombres} ${estudiante.apellidos} de ${cursoNombre} fue marcado como EVADIDO por ${nombreQuienMarco}.
+
+Hora de llegada registrada: ${horaEntradaTexto}
+Fecha: ${registro.fecha}
+Observación: ${registro.observacionVerificacion ?? '(sin observación)'}
+
+Por favor verifica esta acción. ¿Deseas que lo reporte al coordinador?
+      `.trim();
+
+      const replyMarkup = {
+        inline_keyboard: [
+          [
+            {
+              text: '📣 Sí, reportar al coordinador',
+              callback_data: `evadido_escalar:${estudiante.id}:${registro.id}`,
+            },
+          ],
+        ],
+      };
+
+      try {
+        await this.telegramApiService.enviarMensaje(director!.telegramChatId as string, mensaje, replyMarkup);
+      } catch (error) {
+        this.logger.error(`No se pudo notificar al director de grupo sobre el evadido ${estudiante.id}`, error);
+      }
+      return;
+    }
+
+    // Respaldo: no hay director de grupo asignado o verificado — se avisa
+    // directo al coordinador, sin botón de escalar (ya es la notificación
+    // final).
+    const coordinadores = await this.buscarCoordinadoresNotificables();
+    if (coordinadores.length === 0) {
+      return;
+    }
+
+    const mensaje = `
+🚪 Estudiante evadido (sin director de grupo disponible)
+
+Estudiante: ${estudiante.nombres} ${estudiante.apellidos}
+Curso: ${cursoNombre}
+Marcado por: ${nombreQuienMarco}
+Hora de llegada registrada: ${horaEntradaTexto}
+Fecha: ${registro.fecha}
+Observación: ${registro.observacionVerificacion ?? '(sin observación)'}
+
+⚠️ No fue posible avisar primero al director de grupo (no está asignado al curso, o no ha vinculado su Telegram) — se te notifica directamente.
+    `.trim();
+
+    await Promise.all(
+      coordinadores.map((coordinador) =>
+        this.telegramApiService.enviarMensaje(coordinador.telegramChatId as string, mensaje).catch((error) => {
+          this.logger.error(`No se pudo notificar al coordinador ${coordinador.id} sobre un evadido`, error);
+        }),
+      ),
+    );
+  }
+
+  /**
+   * Escala a coordinador un evadido que el director de grupo decidió
+   * reportar (botón "Sí, reportar al coordinador" del mensaje de
+   * Telegram). Se expone como método público porque quien recibe el
+   * callback_query del botón es TelegramBotService (ver
+   * telegram_bot.service.ts) — el webhook de Telegram le llega a él, no a
+   * este servicio — así que la lógica de negocio se centraliza aquí en
+   * vez de duplicarla allá. Vuelve a validar todo desde cero (no confía
+   * en nada que venga del botón salvo los IDs) por si el registro cambió
+   * de estado entre que se mandó el mensaje y que se presionó el botón,
+   * o por si alguien que no es el director de grupo real llegara a
+   * disparar este callback.
+   */
+  async escalarEvadidoACoordinador(
+    estudianteId: string,
+    asistenciaDiariaId: string,
+    solicitanteUsuarioId: string,
+  ): Promise<{ ok: boolean; razon?: 'ya_escalado' | 'no_aplica' | 'no_autorizado' }> {
+    const registro = await this.asistenciaDiariaRepository.findOne({
+      where: { id: asistenciaDiariaId, estudianteId },
+      relations: ['estado'],
+    });
+
+    if (!registro || registro.estado?.codigo !== 'evadido') {
+      return { ok: false, razon: 'no_aplica' };
+    }
+
+    if (registro.evadidoEscaladoCoordinador) {
+      return { ok: false, razon: 'ya_escalado' };
+    }
+
+    const anioLectivo = new Date().getFullYear();
+    const matricula = await this.matriculaRepository.findOne({
+      where: { estudianteId, anioLectivo },
+      relations: ['curso', 'curso.profesorDirector'],
+    });
+
+    const solicitante = await this.usuarioRepository.findOne({ where: { id: solicitanteUsuarioId } });
+    const esDirectorDelCurso =
+      !!matricula?.curso?.profesorDirector &&
+      !!solicitante?.profesorId &&
+      solicitante.profesorId === matricula.curso.profesorDirector.id;
+
+    if (!esDirectorDelCurso) {
+      return { ok: false, razon: 'no_autorizado' };
+    }
+
+    const estudiante = await this.estudianteRepository.findOne({ where: { id: estudianteId } });
+    if (!estudiante) {
+      return { ok: false, razon: 'no_aplica' };
+    }
+
+    const coordinadores = await this.buscarCoordinadoresNotificables();
+    const horaEntradaTexto = registro.horaEntrada ? this.formatearHoraBogota(registro.horaEntrada) : 'desconocida';
+
+    const mensaje = `
+📣 Evadido reportado por el director de grupo
+
+Estudiante: ${estudiante.nombres} ${estudiante.apellidos}
+Curso: ${matricula?.curso?.nombre ?? 'sin curso asignado'}
+Hora de llegada registrada: ${horaEntradaTexto}
+Fecha: ${registro.fecha}
+
+El director de grupo verificó la situación y pidió reportarla al coordinador.
+    `.trim();
+
+    await Promise.all(
+      coordinadores.map((coordinador) =>
+        this.telegramApiService.enviarMensaje(coordinador.telegramChatId as string, mensaje).catch((error) => {
+          this.logger.error(
+            `No se pudo notificar al coordinador ${coordinador.id} sobre la escalación de un evadido`,
+            error,
+          );
+        }),
+      ),
+    );
+
+    registro.evadidoEscaladoCoordinador = true;
+    await this.asistenciaDiariaRepository.save(registro);
+
+    return { ok: true };
+  }
+
+  private async buscarCoordinadoresNotificables(): Promise<Usuario[]> {
+    return this.usuarioRepository
       .createQueryBuilder('usuario')
       .innerJoin('usuario.rol', 'rol')
       .innerJoin('usuario.estado', 'estado')
       .where('estado.codigo = :codigo', { codigo: 'activo' })
       .andWhere('usuario.telegramChatId IS NOT NULL')
-      .andWhere('rol.nombre IN (:...roles)', { roles: ['rector', 'coordinador'] })
+      .andWhere('rol.nombre = :rol', { rol: 'coordinador' })
       .getMany();
-
-    if (matricula?.curso?.profesorDirector) {
-      const director = await this.usuarioRepository.findOne({
-        where: { profesorId: matricula.curso.profesorDirector.id },
-        relations: ['estado'],
-      });
-
-      if (
-        director &&
-        director.estado?.codigo === 'activo' &&
-        director.telegramChatId &&
-        !destinatarios.some((d) => d.id === director.id)
-      ) {
-        destinatarios.push(director);
-      }
-    }
-
-    if (destinatarios.length === 0) {
-      return;
-    }
-
-    const horaEntradaTexto = registro.horaEntrada ? this.formatearHoraBogota(registro.horaEntrada) : 'desconocida';
-    const cursoNombre = matricula?.curso?.nombre ?? 'sin curso asignado';
-
-    const mensaje = `
-🚪 Estudiante marcado como EVADIDO
-
-Estudiante: ${estudiante.nombres} ${estudiante.apellidos}
-Curso: ${cursoNombre}
-Hora de llegada registrada: ${horaEntradaTexto}
-Fecha: ${registro.fecha}
-Observación: ${registro.observacionVerificacion ?? '(sin observación)'}
-    `.trim();
-
-    await Promise.all(
-      destinatarios.map((destinatario) =>
-        this.telegramApiService.enviarMensaje(destinatario.telegramChatId as string, mensaje).catch((error) => {
-          this.logger.error(`No se pudo notificar al usuario ${destinatario.id} sobre un evadido`, error);
-        }),
-      ),
-    );
   }
 
   // ---------- Utilidades ----------

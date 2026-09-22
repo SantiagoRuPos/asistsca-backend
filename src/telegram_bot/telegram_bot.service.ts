@@ -24,6 +24,15 @@ export class TelegramBotService {
   async procesarWebhook(body: any) {
     this.logger.log(`Webhook recibido: ${JSON.stringify(body)}`);
 
+    // Un tap sobre un botón inline (por ejemplo, "Sí, reportar al
+    // coordinador" del aviso de evadido) llega como callback_query, no
+    // como message — se procesa aparte y nunca cae en el flujo normal de
+    // texto/whitelist de abajo.
+    if (body?.callback_query) {
+      await this.procesarCallbackQuery(body.callback_query);
+      return { ok: true };
+    }
+
     const message = body?.message;
 
     if (!message) {
@@ -185,6 +194,84 @@ Comparte tu número de teléfono con el botón de abajo (debe ser el mismo que e
       resize_keyboard: true,
       one_time_keyboard: true,
     });
+  }
+
+  // ---------- Botones inline (callback_query) ----------
+
+  /**
+   * Procesa el botón "Sí, reportar al coordinador" del aviso de evadido
+   * que le llega al director de grupo (ver AsistenciaService.notificarEvadido
+   * / escalarEvadidoACoordinador). Nunca confía en el chatId por sí solo:
+   * primero exige que el chat esté en la whitelist (igual que cualquier
+   * mensaje de texto) y luego AsistenciaService vuelve a validar, del
+   * lado del servidor, que ese usuario es realmente el director de grupo
+   * del curso del estudiante — este método solo interpreta la respuesta y
+   * decide qué mostrarle a quien presionó el botón.
+   */
+  private async procesarCallbackQuery(callbackQuery: any) {
+    const callbackId = callbackQuery.id;
+    const chatId = callbackQuery.message?.chat?.id;
+    const messageId = callbackQuery.message?.message_id;
+    const data: string | undefined = callbackQuery.data;
+
+    if (!callbackId) {
+      return;
+    }
+
+    if (!chatId || !data) {
+      await this.telegramApiService.responderCallback(callbackId);
+      return;
+    }
+
+    const usuario = await this.buscarUsuarioAutorizado(chatId);
+    if (!usuario) {
+      await this.telegramApiService.responderCallback(callbackId, '🚫 No autorizado.', true);
+      return;
+    }
+
+    const [accion, estudianteId, asistenciaDiariaId] = data.split(':');
+
+    if (accion !== 'evadido_escalar' || !estudianteId || !asistenciaDiariaId) {
+      await this.telegramApiService.responderCallback(callbackId);
+      return;
+    }
+
+    const resultado = await this.asistenciaService.escalarEvadidoACoordinador(
+      estudianteId,
+      asistenciaDiariaId,
+      usuario.id,
+    );
+
+    if (resultado.razon === 'no_autorizado') {
+      await this.telegramApiService.responderCallback(
+        callbackId,
+        '🚫 Solo el director de grupo de ese curso puede reportarlo.',
+        true,
+      );
+      return;
+    }
+
+    if (resultado.razon === 'ya_escalado') {
+      await this.telegramApiService.responderCallback(callbackId, 'Ya se le había avisado al coordinador. ✅');
+      if (messageId) {
+        await this.telegramApiService.quitarBotones(chatId, messageId);
+      }
+      return;
+    }
+
+    if (resultado.razon === 'no_aplica') {
+      await this.telegramApiService.responderCallback(
+        callbackId,
+        'Este caso ya no aplica (pudo haber cambiado de estado).',
+        true,
+      );
+      return;
+    }
+
+    await this.telegramApiService.responderCallback(callbackId, '✅ Coordinador notificado.');
+    if (messageId) {
+      await this.telegramApiService.quitarBotones(chatId, messageId);
+    }
   }
 
   // ---------- Comandos ----------
