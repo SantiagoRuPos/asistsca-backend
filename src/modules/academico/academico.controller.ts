@@ -1,9 +1,10 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AcademicoService } from './academico.service';
 import { CrearProfesorDto } from './dto/crear-profesor.dto';
 import { CrearCursoDto } from './dto/crear-curso.dto';
 import { CambiarDirectorCursoDto } from './dto/cambiar-director-curso.dto';
 import { CrearHorarioCursoDto } from './dto/crear-horario-curso.dto';
+import { ActualizarHorarioCursoDto } from './dto/actualizar-horario-curso.dto';
 import { CrearEstudianteDto } from './dto/crear-estudiante.dto';
 import { CrearAcudienteDto } from './dto/crear-acudiente.dto';
 import { FiltrarAcudientesDto } from './dto/filtrar-acudientes.dto';
@@ -81,6 +82,25 @@ export class AcademicoController {
   @Roles(...ROLES_LECTURA)
   listarHorarios(@Param('id', ParseUUIDPipe) id: string) {
     return this.academicoService.listarHorariosCurso(id);
+  }
+
+  @Patch('cursos/:id/horarios/:horarioId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ROLES_GESTION)
+  actualizarHorario(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('horarioId', ParseUUIDPipe) horarioId: string,
+    @Body() dto: ActualizarHorarioCursoDto,
+  ) {
+    return this.academicoService.actualizarHorarioCurso(id, horarioId, dto);
+  }
+
+  @Delete('cursos/:id/horarios/:horarioId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ROLES_GESTION)
+  eliminarHorario(@Param('id', ParseUUIDPipe) id: string, @Param('horarioId', ParseUUIDPipe) horarioId: string) {
+    return this.academicoService.eliminarHorarioCurso(id, horarioId);
   }
 
   @Post('estudiantes')

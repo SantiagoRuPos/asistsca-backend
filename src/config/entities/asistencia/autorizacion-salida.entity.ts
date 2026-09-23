@@ -49,6 +49,23 @@ export class AutorizacionSalida {
   @Column({ type: 'text' })
   motivo!: string;
 
+  // Evidencia adjunta (2026-09-23, pedido explícito del usuario): mismo
+  // patrón de adjuntos ya usado en excusas (PDF/JPG/PNG, 5MB, ver
+  // ExcusasController) — se guarda la URL de descarga y el nombre original,
+  // nunca el archivo en la base de datos. Opcional: se permite autorizar sin
+  // adjuntar nada, por si la evidencia se entrega en papel.
+  // "type" explícito: sin esto, TypeORM intenta inferir el tipo de columna
+  // por reflexión desde el tipo de TypeScript, y para un tipo unión como
+  // "string | null" reflect-metadata solo reporta "Object" — eso rompe el
+  // arranque con DataTypeNotSupportedError en Postgres. Mismo patrón que
+  // Excusa.archivoSoporteUrl/archivoSoporteNombre en excusa.entity.ts (el
+  // ejemplo que debí haber copiado desde el principio).
+  @Column({ name: 'evidencia_url', type: 'text', nullable: true })
+  evidenciaUrl!: string | null;
+
+  @Column({ name: 'evidencia_nombre', type: 'varchar', length: 255, nullable: true })
+  evidenciaNombre!: string | null;
+
   @Column({ name: 'estado_id' })
   estadoId!: string;
 

@@ -535,6 +535,10 @@ export class AsistenciaService {
       TipoRegistroManual.ENTRADA,
       TipoRegistroManual.SALIDA,
       TipoRegistroManual.EVADIDO,
+      // Mismo criterio que EVADIDO: cualquier profesor puede revertir un
+      // evadido que él mismo (o un colega) marcó por error, o porque el
+      // estudiante ya apareció — no se restringe al director de grupo.
+      TipoRegistroManual.ENCONTRADO,
     ];
     if (rolSolicitante === 'profesor' && !TIPOS_PERMITIDOS_PROFESOR.includes(dto.tipoRegistro)) {
       throw new ForbiddenException(
@@ -597,6 +601,27 @@ export class AsistenciaService {
       // A diferencia de ausente/excusado, aquí NO se borra horaEntrada ni
       // eventoEntradaId: son la evidencia de que el estudiante sí llegó, y
       // se conservan para la notificación y para cualquier reporte futuro.
+    } else if (dto.tipoRegistro === TipoRegistroManual.ENCONTRADO) {
+      // Revierte un "evadido" marcado por error, o porque el estudiante ya
+      // apareció. Solo aplica si el registro de hoy está en estado
+      // "evadido" (2026-09-23, pedido explícito del usuario). Se recalcula
+      // presente/tarde con la MISMA hora de entrada que ya estaba guardada
+      // (nunca se borra al marcar evadido, ver arriba) usando exactamente
+      // la misma lógica que decide presente/tarde en cualquier otro flujo
+      // (NFC o entrada manual) — así "encontrado" no inventa una hora de
+      // llegada nueva, solo corrige el estado con la información real.
+      if (!existente || existente.estado?.codigo !== 'evadido') {
+        throw new ConflictException(
+          'Solo se puede marcar como "encontrado" a un estudiante que está marcado como evadido hoy.',
+        );
+      }
+      if (!existente.horaEntrada) {
+        throw new ConflictException(
+          'Este registro de evadido no tiene hora de entrada guardada; no se puede recalcular el estado.',
+        );
+      }
+
+      existente.estado = await this.calcularEstadoEntrada(estudiante.id, fecha, existente.horaEntrada);
     } else {
       const estado = await this.buscarEstado(dto.tipoRegistro);
 

@@ -22,6 +22,7 @@ import { Profesor } from '../../config/entities/academico/profesor.entity';
 import { Acudiente } from '../../config/entities/academico/acudiente.entity';
 import { Usuario } from '../../config/entities/usuarios/usuario.entity';
 import { Estado } from '../../config/entities/catalogos/estado.entity';
+import { Colegio } from '../../config/entities/colegio/colegio.entity';
 import { WhatsappModule } from '../whatsapp/whatsapp.module';
 import { TelegramApiModule } from '../../telegram_bot/telegram-api.module';
 
@@ -43,6 +44,7 @@ import { TelegramApiModule } from '../../telegram_bot/telegram-api.module';
       Acudiente,
       Usuario,
       Estado,
+      Colegio,
     ]),
     WhatsappModule,
     // Para notificar por Telegram al rector/coordinador/director de grupo

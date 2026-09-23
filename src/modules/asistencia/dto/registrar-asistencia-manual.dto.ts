@@ -8,6 +8,9 @@ export enum TipoRegistroManual {
   EVADIDO = 'evadido',
   SALIDA = 'salida',
   ENTRADA = 'entrada',
+  // Revierte un "evadido" marcado por error, o porque el estudiante ya
+  // apareció — ver AsistenciaService.registrarManual para la lógica.
+  ENCONTRADO = 'encontrado',
 }
 
 export class RegistrarAsistenciaManualDto {

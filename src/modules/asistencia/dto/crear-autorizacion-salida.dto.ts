@@ -1,4 +1,4 @@
-import { IsDateString, IsNotEmpty, IsString, IsUUID, Matches, MaxLength } from 'class-validator';
+import { IsDateString, IsNotEmpty, IsOptional, IsString, IsUUID, Matches, MaxLength } from 'class-validator';
 
 export class CrearAutorizacionSalidaDto {
   @IsUUID()
@@ -23,4 +23,17 @@ export class CrearAutorizacionSalidaDto {
   @IsString()
   @IsNotEmpty()
   motivo!: string;
+
+  // Igual que CrearExcusaDto.archivoSoporteUrl/Nombre: se sube primero con
+  // POST /autorizaciones-salida/adjuntos (multer, ver el controller) y se
+  // referencia aquí por URL — opcional, no todas las autorizaciones llevan
+  // evidencia adjunta.
+  @IsOptional()
+  @IsString()
+  evidenciaUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  evidenciaNombre?: string;
 }

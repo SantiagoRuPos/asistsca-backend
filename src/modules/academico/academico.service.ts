@@ -21,6 +21,7 @@ import { CrearProfesorDto } from './dto/crear-profesor.dto';
 import { CrearCursoDto } from './dto/crear-curso.dto';
 import { CambiarDirectorCursoDto } from './dto/cambiar-director-curso.dto';
 import { CrearHorarioCursoDto } from './dto/crear-horario-curso.dto';
+import { ActualizarHorarioCursoDto } from './dto/actualizar-horario-curso.dto';
 import { CrearEstudianteDto } from './dto/crear-estudiante.dto';
 import { CrearAcudienteDto } from './dto/crear-acudiente.dto';
 import { MatricularEstudianteDto } from './dto/matricular-estudiante.dto';
@@ -307,6 +308,27 @@ export class AcademicoService {
       where: { cursoId: curso.id },
       order: { diaSemana: 'ASC' },
     });
+  }
+
+  async actualizarHorarioCurso(cursoId: string, horarioId: string, dto: ActualizarHorarioCursoDto) {
+    const horario = await this.horarioCursoRepository.findOne({ where: { id: horarioId, cursoId } });
+    if (!horario) {
+      throw new NotFoundException('El horario indicado no existe para este curso.');
+    }
+
+    if (dto.horaEntrada !== undefined) horario.horaEntrada = dto.horaEntrada;
+    if (dto.minutosToleranciaTardanza !== undefined) horario.minutosToleranciaTardanza = dto.minutosToleranciaTardanza;
+    if (dto.horaSalida !== undefined) horario.horaSalida = dto.horaSalida;
+
+    return this.horarioCursoRepository.save(horario);
+  }
+
+  async eliminarHorarioCurso(cursoId: string, horarioId: string): Promise<void> {
+    const horario = await this.horarioCursoRepository.findOne({ where: { id: horarioId, cursoId } });
+    if (!horario) {
+      throw new NotFoundException('El horario indicado no existe para este curso.');
+    }
+    await this.horarioCursoRepository.remove(horario);
   }
 
   // ---------- Estudiantes ----------
