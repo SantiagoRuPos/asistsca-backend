@@ -8,6 +8,7 @@ import { resolve } from 'path';
 import { AppConfig } from '../../config/configuration';
 import { LicenciaEstado } from '../../config/entities/licenciamiento/licencia-estado.entity';
 import { calcularFingerprintServidor } from './utils/fingerprint.util';
+import { TelegramApiService } from '../../telegram_bot/telegram-api.service';
 
 export type NivelLicencia = 'activa' | 'aviso' | 'degradada';
 
@@ -50,6 +51,7 @@ export class LicenciaTokenService {
     private readonly licenciaEstadoRepository: Repository<LicenciaEstado>,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService<AppConfig, true>,
+    private readonly telegramApiService: TelegramApiService,
   ) {}
 
   /**
@@ -75,15 +77,59 @@ export class LicenciaTokenService {
 
     const claims = tokenCrudo ? this.verificarFirmaYExpiracion(tokenCrudo) : null;
 
-    if (claims && this.verificarFingerprint(claims, fingerprintServidor, registro)) {
-      const estado = await this.marcarValidacionExitosa(registro, tokenCrudo!, claims, fingerprintServidor);
-      this.guardarEnCache(estado);
-      return estado;
-    }
+    const estado =
+      claims && this.verificarFingerprint(claims, fingerprintServidor, registro)
+        ? await this.marcarValidacionExitosa(registro, tokenCrudo!, claims, fingerprintServidor)
+        : this.calcularEstadoDeGracia(registro, fingerprintServidor);
 
-    const estado = this.calcularEstadoDeGracia(registro, fingerprintServidor);
+    await this.gestionarAlertaTelegram(estado, registro);
     this.guardarEnCache(estado);
     return estado;
+  }
+
+  /**
+   * Avisa a SCA por Telegram (no al colegio) cuando esta instalación pasa a
+   * "aviso"/"degradada", y una vez más cuando se recupera. Se dispara desde
+   * `revalidar()` (como mucho cada TTL_CACHE_MS = 60s, nunca en cada
+   * request), y solo reenvía si el nivel realmente CAMBIÓ desde la última
+   * alerta — así un "aviso" que dura 20 días no manda 20 días de mensajes
+   * repetidos. `registro.alertaTelegramNivel` es lo que recuerda el último
+   * nivel por el que ya se avisó (ver la entity).
+   *
+   * Best-effort y silencioso ante fallos de Telegram: un aviso que no llega
+   * nunca debe afectar el resultado de `/licencia/estado` ni el guard.
+   */
+  private async gestionarAlertaTelegram(estado: EstadoLicencia, registro: LicenciaEstado): Promise<void> {
+    const chatId = this.configService.get('licencia.alertaTelegramChatId', { infer: true });
+    if (!chatId) return; // No configurado — la función queda apagada sin romper nada.
+
+    const nivelParaAlerta: 'aviso' | 'degradada' | null = estado.nivel === 'activa' ? null : estado.nivel;
+    if (registro.alertaTelegramNivel === nivelParaAlerta) return; // Ya se avisó de este mismo estado.
+
+    const identificacion = registro.clienteCodigo ?? `instalación sin identificar (fingerprint ${estado.fingerprintServidor})`;
+
+    try {
+      if (nivelParaAlerta) {
+        const emoji = nivelParaAlerta === 'degradada' ? '🔴' : '🟡';
+        await this.telegramApiService.enviarMensaje(
+          chatId,
+          `${emoji} AsistSCA — ${identificacion}
+Licencia en nivel "${nivelParaAlerta}".
+${estado.mensaje}`,
+        );
+      } else {
+        await this.telegramApiService.enviarMensaje(
+          chatId,
+          `✅ AsistSCA — ${identificacion}
+La licencia volvió a validar correctamente (nivel "activa").`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(`No se pudo enviar la alerta de licencia por Telegram: ${(error as Error).message}`);
+    }
+
+    registro.alertaTelegramNivel = nivelParaAlerta;
+    await this.licenciaEstadoRepository.save(registro);
   }
 
   // --- Paso 1: firma + expiración -----------------------------------------

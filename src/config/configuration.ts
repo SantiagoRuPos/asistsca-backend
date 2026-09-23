@@ -53,6 +53,11 @@ export interface AppConfig {
     // debe recibir el mismo colchón de 22 días que un cliente real cuya
     // renovación falló. Ver LicenciaTokenService.calcularEstadoDeGracia.
     diasGraciaPrimeraActivacion: number;
+    // Chat de Telegram (de SCA, no del colegio) que recibe un aviso
+    // automático cuando esta instalación pasa a 'aviso' o 'degradada' (y
+    // otro cuando se recupera). null si no se configuró — la función queda
+    // apagada sin romper nada. Ver LicenciaTokenService.gestionarAlertaTelegram.
+    alertaTelegramChatId: string | null;
   };
 }
 
@@ -114,5 +119,6 @@ export default (): AppConfig => ({
     diasAviso: parseInt(process.env.LICENCIA_DIAS_AVISO ?? '15', 10),
     diasDegradacionAdicional: parseInt(process.env.LICENCIA_DIAS_DEGRADACION_ADICIONAL ?? '7', 10),
     diasGraciaPrimeraActivacion: parseInt(process.env.LICENCIA_DIAS_GRACIA_PRIMERA_ACTIVACION ?? '3', 10),
+    alertaTelegramChatId: process.env.LICENCIA_ALERTA_TELEGRAM_CHAT_ID ?? null,
   },
 });

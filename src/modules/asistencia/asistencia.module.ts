@@ -61,9 +61,9 @@ import { TelegramApiModule } from '../../telegram_bot/telegram-api.module';
     AutorizacionesSalidaController,
   ],
   providers: [AsistenciaService, ExcusasService, AutorizacionesSalidaService],
-  // AsistenciaService se exporta para que el bot de Telegram (TelegramBotModule)
-  // pueda reutilizar el resumen diario y el nuevo obtenerEvadidosHoy() sin
-  // duplicar la lógica de consulta a asistencia_diaria.
-  exports: [AsistenciaService],
+  // Los tres se exportan para que el bot de Telegram (TelegramBotModule)
+  // pueda reutilizar el resumen diario, obtenerEvadidosHoy(), las excusas
+  // pendientes y las autorizaciones de salida del día sin duplicar consultas.
+  exports: [AsistenciaService, ExcusasService, AutorizacionesSalidaService],
 })
 export class AsistenciaModule {}

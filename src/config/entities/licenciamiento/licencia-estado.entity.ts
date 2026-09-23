@@ -49,6 +49,14 @@ export class LicenciaEstado {
   @Column({ type: 'jsonb', nullable: true })
   limites!: Record<string, number> | null;
 
+  // Último nivel ('aviso' | 'degradada') por el que ya se avisó a SCA por
+  // Telegram — evita reenviar la misma alerta en cada revalidación (cada
+  // 60s mientras el estado no cambie). null = o nunca hizo falta avisar, o
+  // ya se avisó de la recuperación (volvió a 'activa'). Ver
+  // LicenciaTokenService.gestionarAlertaTelegram.
+  @Column({ name: 'alerta_telegram_nivel', type: 'varchar', length: 20, nullable: true })
+  alertaTelegramNivel!: 'aviso' | 'degradada' | null;
+
   @CreateDateColumn({ name: 'creado_en' })
   creadoEn!: Date;
 

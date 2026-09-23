@@ -920,6 +920,14 @@ El director de grupo verificó la situación y pidió reportarla al coordinador.
     }).format(fecha);
   }
 
+  // Envoltorio público de obtenerFechaBogota(new Date()) — para consumidores
+  // fuera de esta clase (ej. el bot de Telegram) que necesitan "la fecha de
+  // hoy en Bogotá" con el mismo criterio que usa el resto de este servicio,
+  // sin duplicar el cálculo de zona horaria en otro archivo.
+  fechaHoyBogota(): string {
+    return this.obtenerFechaBogota(new Date());
+  }
+
   private obtenerHoraActualBogota(): string {
     return this.formatearHoraBogota(new Date());
   }

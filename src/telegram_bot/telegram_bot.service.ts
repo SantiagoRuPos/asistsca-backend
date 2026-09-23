@@ -4,6 +4,8 @@ import { IsNull, Not, Repository } from 'typeorm';
 import { Usuario } from '../config/entities/usuarios/usuario.entity';
 import { AcademicoService } from '../modules/academico/academico.service';
 import { AsistenciaService } from '../modules/asistencia/asistencia.service';
+import { ExcusasService } from '../modules/asistencia/excusas.service';
+import { AutorizacionesSalidaService } from '../modules/asistencia/autorizaciones-salida.service';
 import { TelegramApiService } from './telegram-api.service';
 
 // Telegram corta los mensajes por encima de 4096 caracteres (error 400 de su
@@ -18,6 +20,8 @@ export class TelegramBotService {
     @InjectRepository(Usuario) private readonly usuarioRepository: Repository<Usuario>,
     private readonly academicoService: AcademicoService,
     private readonly asistenciaService: AsistenciaService,
+    private readonly excusasService: ExcusasService,
+    private readonly autorizacionesSalidaService: AutorizacionesSalidaService,
     private readonly telegramApiService: TelegramApiService,
   ) {}
 
@@ -289,6 +293,21 @@ Comparte tu número de teléfono con el botón de abajo (debe ser el mismo que e
         await this.enviarListaEvadidos(chatId);
         break;
 
+      case 'excusas':
+      case '/excusas':
+        await this.enviarExcusasPendientes(chatId);
+        break;
+
+      case 'salidas':
+      case '/salidas':
+        await this.enviarSalidasHoy(chatId);
+        break;
+
+      case 'ayuda':
+      case '/ayuda':
+        await this.enviarAyuda(chatId);
+        break;
+
       default:
         await this.enviarMensajeNoReconocido(chatId);
         break;
@@ -301,7 +320,16 @@ Comparte tu número de teléfono con el botón de abajo (debe ser el mismo que e
 
 • Estudiantes → total de estudiantes del colegio, ausentes y evadidos de hoy.
 • Evadidos → la lista de quiénes están marcados como evadidos hoy.
+• Excusas → cuántas excusas están pendientes de revisar.
+• Salidas → autorizaciones de salida anticipada de hoy.
+• Ayuda → este mensaje.
     `.trim();
+  }
+
+  private async enviarAyuda(chatId: number) {
+    await this.enviarMensaje(chatId, `ℹ️ Comandos disponibles
+
+${this.textoMenuAyuda()}`);
   }
 
   private async enviarSaludo(chatId: number, usuario: Usuario) {
@@ -368,6 +396,78 @@ Escribe "evadidos" para ver quiénes son.
 
     const mensaje = `
 🚪 Evadidos hoy (${evadidos.fecha}) — ${evadidos.valor}
+
+${lineas}${notaRecorte}
+    `.trim();
+
+    await this.enviarMensaje(chatId, mensaje);
+  }
+
+  private async enviarExcusasPendientes(chatId: number) {
+    const resumen = await this.excusasService.obtenerResumen();
+
+    if (resumen.pendientes === 0) {
+      await this.enviarMensaje(chatId, '✅ No hay excusas pendientes de revisar.');
+      return;
+    }
+
+    // Solo se listan las primeras (mismo límite que usa la pantalla Excusas
+    // por página) — el conteo del encabezado es el total real, no el de la
+    // lista mostrada, para no dar una cifra recortada por error.
+    const { datos } = await this.excusasService.listarFiltradas({ estado: 'pendiente', pagina: 1, limite: 15 });
+
+    let lineas = datos
+      .map((excusa) => {
+        const curso = excusa.curso ? ` (${excusa.curso.nombre})` : '';
+        return `• ${excusa.estudiante.nombres} ${excusa.estudiante.apellidos}${curso} — falta del ${excusa.fechaAusencia}`;
+      })
+      .join('\n');
+
+    let notaRecorte = '';
+    if (resumen.pendientes > datos.length) {
+      notaRecorte = `
+
+… y ${resumen.pendientes - datos.length} más (usa la pantalla Excusas para ver todas).`;
+    }
+
+    const mensaje = `
+📋 Excusas pendientes — ${resumen.pendientes}
+
+${lineas}${notaRecorte}
+    `.trim();
+
+    await this.enviarMensaje(chatId, mensaje);
+  }
+
+  private async enviarSalidasHoy(chatId: number) {
+    const fechaHoy = this.asistenciaService.fechaHoyBogota();
+    const autorizaciones = await this.autorizacionesSalidaService.listar(undefined, fechaHoy);
+
+    if (autorizaciones.length === 0) {
+      await this.enviarMensaje(chatId, `✅ No hay autorizaciones de salida anticipada registradas hoy (${fechaHoy}).`);
+      return;
+    }
+
+    let lineas = autorizaciones
+      .map((autorizacion) => {
+        const estudiante = `${autorizacion.estudiante.nombres} ${autorizacion.estudiante.apellidos}`;
+        const estadoTexto = autorizacion.estado?.nombre ?? '';
+        return `• ${estudiante} — ${autorizacion.horaAutorizada.slice(0, 5)} · ${autorizacion.motivo} (${estadoTexto})`;
+      })
+      .join('\n');
+
+    let notaRecorte = '';
+    if (lineas.length > LIMITE_CARACTERES_MENSAJE) {
+      lineas = lineas.slice(0, LIMITE_CARACTERES_MENSAJE);
+      lineas = lineas.slice(0, lineas.lastIndexOf('\n'));
+      const mostrados = lineas.split('\n').length;
+      notaRecorte = `
+
+… y ${autorizaciones.length - mostrados} más (la lista es muy larga para un solo mensaje).`;
+    }
+
+    const mensaje = `
+🚶 Salidas anticipadas hoy (${fechaHoy}) — ${autorizaciones.length}
 
 ${lineas}${notaRecorte}
     `.trim();

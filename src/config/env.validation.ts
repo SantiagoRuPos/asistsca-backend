@@ -135,6 +135,10 @@ class EnvironmentVariables {
   @IsOptional()
   @IsNumberString()
   LICENCIA_DIAS_GRACIA_PRIMERA_ACTIVACION!: string;
+
+  @IsOptional()
+  @IsString()
+  LICENCIA_ALERTA_TELEGRAM_CHAT_ID!: string;
 }
 
 export function validateEnv(config: Record<string, unknown>) {

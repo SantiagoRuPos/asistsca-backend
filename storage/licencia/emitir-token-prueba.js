@@ -21,9 +21,19 @@
  * necesite otra duración, se puede pasar --horas explícitamente (ej. una
  * prueba piloto corta), pero el estándar para clientes reales es no pasarlo
  * y dejar que use el año completo.
+ *
+ * Antes de firmar, el script valida que --llave-privada sea de verdad una
+ * llave privada EC (no cualquier otro texto pegado por error — esto pasó de
+ * verdad el 2026-09-23: se pegó por accidente un comando de PowerShell en
+ * vez de la llave) y, si existe storage/licencia/public-key.pem al lado de
+ * este script, confirma que esa llave privada corresponde exactamente a esa
+ * pública antes de continuar. Usa --forzar para saltarte esta segunda
+ * comprobación (ej. si a propósito estás firmando con una llave de prueba
+ * distinta a la de producción).
  */
 const crypto = require('crypto');
 const fs = require('fs');
+const path = require('path');
 
 function leerArgs() {
   const args = {};
@@ -53,6 +63,62 @@ function firmarJwtEs256(payload, privateKeyPem) {
   return `${datosAFirmar}.${base64url(firma)}`;
 }
 
+/**
+ * Verifica que el texto dado sea realmente una llave privada EC P-256 válida.
+ * Si no lo es (por ejemplo, si alguien pegó por error otra cosa, como pasó el
+ * 2026-09-23), falla con un mensaje claro en vez de un error críptico de
+ * OpenSSL más adelante.
+ */
+function validarLlavePrivadaEc(privateKeyPem, rutaOriginal) {
+  let keyObject;
+  try {
+    keyObject = crypto.createPrivateKey({ key: privateKeyPem, format: 'pem' });
+  } catch (error) {
+    console.error(`\nEl archivo "${rutaOriginal}" no contiene una llave privada válida.`);
+    console.error(`Detalle: ${(error).message}`);
+    console.error('¿Copiaste de verdad la llave privada desde el gestor de contraseñas, y no otra cosa (un comando, un texto del chat, etc.)?\n');
+    process.exit(1);
+  }
+
+  if (keyObject.asymmetricKeyType !== 'ec') {
+    console.error(`\nEl archivo "${rutaOriginal}" es una llave privada, pero de tipo "${keyObject.asymmetricKeyType}", no EC (se esperaba ECDSA P-256).\n`);
+    process.exit(1);
+  }
+
+  const curva = keyObject.asymmetricKeyDetails && keyObject.asymmetricKeyDetails.namedCurve;
+  if (curva && curva !== 'prime256v1') {
+    console.error(`\nLa llave privada en "${rutaOriginal}" usa la curva "${curva}", no "prime256v1" (P-256) como espera AsistSCA.\n`);
+    process.exit(1);
+  }
+
+  return keyObject;
+}
+
+/**
+ * Si existe storage/licencia/public-key.pem junto a este script, confirma
+ * que la llave privada dada corresponde exactamente a esa pública — evita
+ * firmar (y entregar) un token con la llave equivocada sin darse cuenta.
+ */
+function validarCoincideConPublicaDelProyecto(keyObject, forzar) {
+  const rutaPublica = path.join(__dirname, 'public-key.pem');
+  if (!fs.existsSync(rutaPublica)) {
+    return; // Nada que comparar (ej. entorno nuevo sin llave pública todavía).
+  }
+
+  const publicaDelProyecto = fs.readFileSync(rutaPublica, 'utf8').replace(/\r\n/g, '\n').trim();
+  const publicaDerivada = crypto.createPublicKey(keyObject).export({ type: 'spki', format: 'pem' }).replace(/\r\n/g, '\n').trim();
+
+  if (publicaDelProyecto !== publicaDerivada) {
+    console.error(`\nLa llave privada que diste NO corresponde a "storage/licencia/public-key.pem" de este proyecto.`);
+    console.error('Un token firmado así nunca vería el backend como válido (el guard lo rechazaría igual que un token sin firmar).');
+    console.error('Si esto es intencional (ej. una prueba con otra llave), volvé a correr con --forzar.\n');
+    if (!forzar) {
+      process.exit(1);
+    }
+    console.error('(--forzar activo: continuando de todas formas.)\n');
+  }
+}
+
 function main() {
   const args = leerArgs();
 
@@ -63,6 +129,9 @@ function main() {
   }
 
   const privateKeyPem = fs.readFileSync(args['llave-privada'], 'utf8');
+  const keyObject = validarLlavePrivadaEc(privateKeyPem, args['llave-privada']);
+  validarCoincideConPublicaDelProyecto(keyObject, Boolean(args.forzar));
+
   // Duración estándar comercial de toda licencia de AsistSCA: 1 año.
   // --horas queda disponible solo para casos puntuales (ej. una prueba piloto
   // corta) que necesiten un vencimiento distinto.
