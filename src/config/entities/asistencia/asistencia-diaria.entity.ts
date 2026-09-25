@@ -77,4 +77,21 @@ export class AsistenciaDiaria {
   // es "evadido"; en cualquier otro caso queda en false sin significado.
   @Column({ name: 'evadido_escalado_coordinador', default: false })
   evadidoEscaladoCoordinador!: boolean;
+
+  // (2026-09-25) "Deshacer" un registro hecho por error (ej. desde Carnets:
+  // Entrada/Salida por accidente al estudiante equivocado). Se guarda un
+  // solo nivel de historial -- el estado justo antes de la corrección más
+  // reciente -- como JSON, en vez de una tabla de historial aparte, porque
+  // solo hace falta poder deshacer el último cambio, no navegar un
+  // historial completo. Ver AsistenciaService.registrarManual (quien lo
+  // escribe) y deshacerRegistroManual (quien lo consume y lo limpia).
+  @Column({ name: 'snapshot_antes_correccion', type: 'text', nullable: true })
+  snapshotAntesCorreccion!: string | null;
+
+  // Qué tipoRegistro fue la corrección más reciente (entrada/salida/
+  // evadido/etc.) -- necesario para que un profesor solo pueda deshacer
+  // los tipos que él mismo puede registrar directamente (mismo criterio
+  // que TIPOS_PERMITIDOS_PROFESOR).
+  @Column({ name: 'ultimo_tipo_correccion', type: 'varchar', length: 20, nullable: true })
+  ultimoTipoCorreccion!: string | null;
 }

@@ -107,6 +107,17 @@ class EnvironmentVariables {
   @IsString()
   BRAND_NAME!: string;
 
+  // --- Cookie del refresh token (httpOnly) ---
+  // Opcionales: si no se completan, configuration.ts decide un valor por
+  // defecto seguro (secure=true solo en producción, sameSite='lax').
+  @IsOptional()
+  @IsBooleanString()
+  COOKIE_SECURE!: string;
+
+  @IsOptional()
+  @IsIn(['lax', 'strict', 'none'])
+  COOKIE_SAME_SITE!: string;
+
   // --- Licenciamiento comercial (Fase 1) ---
   // Todas opcionales: si no se completan, configuration.ts usa los valores
   // por defecto (storage/licencia/... y 15+7 días de gracia) para que el

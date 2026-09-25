@@ -66,22 +66,31 @@ export class WhatsappService {
         minute: '2-digit',
       });
 
-      for (const contacto of contactos) {
-        const nombreAcudiente = `${contacto.acudiente.nombres} ${contacto.acudiente.apellidos}`;
-        const nombreEstudiante = `${contacto.estudiante.nombres} ${contacto.estudiante.apellidos}`;
+      // (2026-09-25) Antes se mandaba a cada acudiente uno por uno con
+      // await dentro del for — si un estudiante tenía dos contactos
+      // marcados (ej. mamá y papá), el segundo mensaje esperaba a que el
+      // primero terminara contra la API de Meta antes de siquiera empezar.
+      // Como esto ya corre en segundo plano (void notificarEvento, no
+      // bloquea la respuesta al ESP32), no hay ninguna razón para no
+      // lanzarlos todos al mismo tiempo.
+      await Promise.all(
+        contactos.map((contacto) => {
+          const nombreAcudiente = `${contacto.acudiente.nombres} ${contacto.acudiente.apellidos}`;
+          const nombreEstudiante = `${contacto.estudiante.nombres} ${contacto.estudiante.apellidos}`;
 
-        await this.enviarYRegistrar({
-          estudianteId,
-          acudienteId: contacto.acudienteId,
-          telefono: contacto.acudiente.telefonoWhatsapp,
-          tipoMensaje,
-          nombrePlantilla,
-          idioma: idiomaPlantilla,
-          parametros: [nombreAcudiente, nombreEstudiante, nombreColegio, fecha, hora],
-          configuracion,
-          origenEventoId: evento.id,
-        });
-      }
+          return this.enviarYRegistrar({
+            estudianteId,
+            acudienteId: contacto.acudienteId,
+            telefono: contacto.acudiente.telefonoWhatsapp,
+            tipoMensaje,
+            nombrePlantilla,
+            idioma: idiomaPlantilla,
+            parametros: [nombreAcudiente, nombreEstudiante, nombreColegio, fecha, hora],
+            configuracion,
+            origenEventoId: evento.id,
+          });
+        }),
+      );
     } catch (error) {
       this.logger.error(`No se pudo notificar el evento ${evento.id} por WhatsApp: ${error}`);
     }
@@ -102,6 +111,15 @@ export class WhatsappService {
     let whatsappMessageId: string | null = null;
     let codigoEstado = 'fallido';
 
+    // (2026-09-25) Timeout explícito: el fetch nativo de Node no tiene uno
+    // por defecto, así que si Meta (o la red de salida del servidor) se
+    // cuelga, este envío podía quedar colgado mucho más de lo razonable
+    // en vez de fallar rápido y quedar registrado como "fallido".
+    const TIEMPO_LIMITE_ENVIO_MS = 10_000;
+    const controladorTiempoLimite = new AbortController();
+    const temporizador = setTimeout(() => controladorTiempoLimite.abort(), TIEMPO_LIMITE_ENVIO_MS);
+    const inicioEnvio = Date.now();
+
     try {
       const respuesta = await fetch(
         `https://graph.facebook.com/${configuracion.apiVersion}/${configuracion.phoneNumberId}/messages`,
@@ -111,6 +129,7 @@ export class WhatsappService {
             Authorization: `Bearer ${configuracion.accessToken}`,
             'Content-Type': 'application/json',
           },
+          signal: controladorTiempoLimite.signal,
           body: JSON.stringify({
             messaging_product: 'whatsapp',
             to: telefono,
@@ -127,15 +146,21 @@ export class WhatsappService {
       );
 
       const cuerpo = await respuesta.json().catch(() => null);
+      const duracionMs = Date.now() - inicioEnvio;
 
       if (respuesta.ok) {
         whatsappMessageId = cuerpo?.messages?.[0]?.id ?? null;
         codigoEstado = 'enviado';
+        this.logger.log(`WhatsApp aceptado por Meta en ${duracionMs} ms (a ${telefono}, plantilla ${nombrePlantilla}).`);
       } else {
-        this.logger.error(`Meta respondió error al enviar WhatsApp: ${JSON.stringify(cuerpo)}`);
+        this.logger.error(`Meta respondió error al enviar WhatsApp tras ${duracionMs} ms: ${JSON.stringify(cuerpo)}`);
       }
     } catch (error) {
-      this.logger.error(`Error de red enviando WhatsApp: ${error}`);
+      const duracionMs = Date.now() - inicioEnvio;
+      const motivo = controladorTiempoLimite.signal.aborted ? `tiempo de espera agotado (${TIEMPO_LIMITE_ENVIO_MS} ms)` : String(error);
+      this.logger.error(`Error enviando WhatsApp tras ${duracionMs} ms: ${motivo}`);
+    } finally {
+      clearTimeout(temporizador);
     }
 
     const estado = await this.estadoRepository.findOne({

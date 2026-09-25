@@ -1,3 +1,5 @@
+import { parsearDuracionMs } from '../common/utils/duracion.util';
+
 export interface AppConfig {
   env: string;
   port: number;
@@ -40,6 +42,20 @@ export interface AppConfig {
     name: string;
   };
   corsOrigins: string[];
+  cookies: {
+    // El refresh token viaja en una cookie httpOnly (no accesible desde JS,
+    // ver auth.controller.ts) en vez de en el cuerpo de la respuesta/localStorage.
+    // secure=true exige HTTPS: por defecto se activa solo en producción para no
+    // romper el desarrollo local en http://localhost. sameSite='lax' basta
+    // mientras frontend y backend compartan el mismo "site" (mismo dominio
+    // registrable, aunque cambie el puerto o el subdominio) — si algún día se
+    // despliegan en dominios registrables distintos, hace falta
+    // COOKIE_SAME_SITE=none (y por lo tanto COOKIE_SECURE=true, exigido por
+    // los navegadores para SameSite=None).
+    secure: boolean;
+    sameSite: 'lax' | 'strict' | 'none';
+    refreshMaxAgeMs: number;
+  };
   licencia: {
     // Rutas relativas a process.cwd() (raíz del backend en ejecución).
     publicKeyPath: string;
@@ -111,6 +127,14 @@ export default (): AppConfig => ({
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean),
+
+  cookies: {
+    secure: process.env.COOKIE_SECURE
+      ? process.env.COOKIE_SECURE === 'true'
+      : process.env.NODE_ENV === 'production',
+    sameSite: (process.env.COOKIE_SAME_SITE as 'lax' | 'strict' | 'none' | undefined) ?? 'lax',
+    refreshMaxAgeMs: parsearDuracionMs(process.env.JWT_REFRESH_EXPIRES_IN ?? '7d'),
+  },
 
   licencia: {
     publicKeyPath: process.env.LICENCIA_PUBLIC_KEY_PATH ?? 'storage/licencia/public-key.pem',

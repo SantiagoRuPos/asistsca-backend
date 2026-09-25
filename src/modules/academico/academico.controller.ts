@@ -10,6 +10,7 @@ import { CrearAcudienteDto } from './dto/crear-acudiente.dto';
 import { FiltrarAcudientesDto } from './dto/filtrar-acudientes.dto';
 import { ActualizarAcudienteDto } from './dto/actualizar-acudiente.dto';
 import { ActualizarContactoAcudienteDto } from './dto/actualizar-contacto-acudiente.dto';
+import { VincularAcudienteExistenteDto } from './dto/vincular-acudiente-existente.dto';
 import { MatricularEstudianteDto } from './dto/matricular-estudiante.dto';
 import { FiltrarEstudiantesDto } from './dto/filtrar-estudiantes.dto';
 import { RegistrarEstudianteCompletoDto } from './dto/registrar-estudiante-completo.dto';
@@ -141,6 +142,17 @@ export class AcademicoController {
     return this.academicoService.actualizarAcudiente(id, dto);
   }
 
+  // (2026-09-25) Vincula un acudiente ya existente a un estudiante
+  // adicional (hermanos/sobrinos que comparten el mismo acudiente), sin
+  // duplicar sus datos creando un registro nuevo.
+  @Post('acudientes/:id/vincular')
+  @HttpCode(HttpStatus.CREATED)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ROLES_GESTION)
+  vincularAcudienteExistente(@Param('id', ParseUUIDPipe) id: string, @Body() dto: VincularAcudienteExistenteDto) {
+    return this.academicoService.vincularAcudienteExistente(id, dto);
+  }
+
   @Patch('estudiantes/:estudianteId/acudientes/:acudienteId/contacto')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(...ROLES_GESTION)
@@ -160,16 +172,28 @@ export class AcademicoController {
     return this.academicoService.matricularEstudiante(dto);
   }
 
+  // (2026-09-25) Antes usaban ROLES_LECTURA (incluye profesor). La pantalla
+  // Estudiantes ya está restringida a admin/rector/coordinador en el menú y
+  // en el router del frontend -- ningún profesor debería poder llegar
+  // aquí desde la interfaz. Pero el backend seguía dejando pasar a
+  // "profesor" en estos dos endpoints (el listado completo paginado y su
+  // resumen), así que alguien con el token de un profesor podía seguir
+  // pidiéndolos directo por API y ver el listado completo de TODO el
+  // colegio, no solo lo que puede ver desde el menú. Se cierra aquí --
+  // los selectores que un profesor sí necesita (crear una excusa, el
+  // wizard de estudiantes, etc.) usan /estudiantes/activos y
+  // /estudiantes/matriculados, que siguen abiertos a profesor porque son
+  // listas simples de nombre+id, no el detalle completo paginado.
   @Get('estudiantes/resumen')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(...ROLES_LECTURA)
+  @Roles(...ROLES_GESTION)
   obtenerResumenEstudiantes() {
     return this.academicoService.obtenerResumenEstudiantes();
   }
 
   @Get('estudiantes')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(...ROLES_LECTURA)
+  @Roles(...ROLES_GESTION)
   listarEstudiantes(@Query() filtros: FiltrarEstudiantesDto) {
     return this.academicoService.listarEstudiantes(filtros);
   }

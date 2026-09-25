@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomUUID } from 'crypto';
+import { parsearDuracionMs } from '../../common/utils/duracion.util';
 import { Usuario } from '../../config/entities/usuarios/usuario.entity';
 import { RefreshToken } from '../../config/entities/auth/refresh-token.entity';
 import { AppConfig } from '../../config/configuration';
@@ -188,7 +189,7 @@ const payload = {
   const registro = this.refreshTokenRepository.create({
     usuarioId: usuario.id,
     tokenHash: this.hashToken(refreshToken),
-    fechaExpiracion: new Date(Date.now() + this.parsearDuracionMs(refreshExpiresIn)),
+    fechaExpiracion: new Date(Date.now() + parsearDuracionMs(refreshExpiresIn)),
   });
   const guardado = await this.refreshTokenRepository.save(registro);
 
@@ -199,10 +200,4 @@ const payload = {
     return createHash('sha256').update(token).digest('hex');
   }
 
-  private parsearDuracionMs(duracion: string): number {
-    const match = /^(\d+)([smhd])$/.exec(duracion);
-    if (!match) throw new Error(`Formato de duración inválido: ${duracion}`);
-    const multiplicadores: Record<string, number> = { s: 1000, m: 60000, h: 3600000, d: 86400000 };
-    return parseInt(match[1], 10) * multiplicadores[match[2]];
-  }
 }

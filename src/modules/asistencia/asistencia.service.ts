@@ -19,6 +19,24 @@ import { RegistrarAsistenciaManualDto, TipoRegistroManual } from './dto/registra
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { TelegramApiService } from '../../telegram_bot/telegram-api.service';
 
+// (2026-09-25) Ver deshacerRegistroManual: snapshot del estado de un
+// AsistenciaDiaria justo antes de una corrección manual, para poder
+// revertir la más reciente si fue un error.
+interface SnapshotAsistencia {
+  existia: boolean;
+  estadoId: string | null;
+  horaEntrada: string | null;
+  horaSalida: string | null;
+  eventoEntradaId: string | null;
+  eventoSalidaId: string | null;
+  origen: OrigenAsistencia | null;
+  observacionVerificacion: string | null;
+  verificadoPorUsuarioId: string | null;
+  fechaVerificacion: string | null;
+  salidaAnticipada: boolean;
+  evadidoEscaladoCoordinador: boolean;
+}
+
 @Injectable()
 export class AsistenciaService {
   private readonly logger = new Logger(AsistenciaService.name);
@@ -560,6 +578,38 @@ export class AsistenciaService {
       relations: ['estado'],
     });
 
+    // Snapshot ANTES de tocar nada -- ver deshacerRegistroManual. Solo se
+    // guarda un nivel (el de esta corrección), no una pila de cambios.
+    const snapshotAntes: SnapshotAsistencia = existente
+      ? {
+          existia: true,
+          estadoId: existente.estadoId,
+          horaEntrada: existente.horaEntrada ? existente.horaEntrada.toISOString() : null,
+          horaSalida: existente.horaSalida ? existente.horaSalida.toISOString() : null,
+          eventoEntradaId: existente.eventoEntradaId,
+          eventoSalidaId: existente.eventoSalidaId,
+          origen: existente.origen,
+          observacionVerificacion: existente.observacionVerificacion,
+          verificadoPorUsuarioId: existente.verificadoPorUsuarioId,
+          fechaVerificacion: existente.fechaVerificacion ? existente.fechaVerificacion.toISOString() : null,
+          salidaAnticipada: existente.salidaAnticipada,
+          evadidoEscaladoCoordinador: existente.evadidoEscaladoCoordinador,
+        }
+      : {
+          existia: false,
+          estadoId: null,
+          horaEntrada: null,
+          horaSalida: null,
+          eventoEntradaId: null,
+          eventoSalidaId: null,
+          origen: null,
+          observacionVerificacion: null,
+          verificadoPorUsuarioId: null,
+          fechaVerificacion: null,
+          salidaAnticipada: false,
+          evadidoEscaladoCoordinador: false,
+        };
+
     if (dto.tipoRegistro === TipoRegistroManual.ENTRADA) {
       // El sistema decide presente/tarde automáticamente, igual que el
       // flujo de ingesta NFC (ver actualizarAsistenciaDiaria) — el profesor
@@ -641,6 +691,8 @@ export class AsistenciaService {
     existente.verificadoPorUsuarioId = usuarioId;
     existente.fechaVerificacion = new Date();
     existente.observacionVerificacion = dto.observacion;
+    existente.snapshotAntesCorreccion = JSON.stringify(snapshotAntes);
+    existente.ultimoTipoCorreccion = dto.tipoRegistro;
 
     const guardado = await this.asistenciaDiariaRepository.save(existente);
 
@@ -654,6 +706,80 @@ export class AsistenciaService {
     }
 
     return guardado;
+  }
+
+  /**
+   * (2026-09-25) Deshace la corrección manual más reciente de HOY para un
+   * estudiante -- pensado para el caso real de marcar "Entrada"/"Salida"/
+   * "Evadido" por error desde Carnets (un solo clic, sin confirmación,
+   * fácil de equivocarse de fila). Solo deshace UN nivel: cada
+   * registrarManual sobreescribe el snapshot anterior, no hay una pila de
+   * cambios. Nunca toca un registro cuyo origen sea una tarjeta NFC real
+   * -- eso protege datos reales de asistencia de un "deshacer" accidental.
+   */
+  async deshacerRegistroManual(
+    estudianteId: string,
+    rolSolicitante: string,
+  ): Promise<{ eliminado: boolean; registro: AsistenciaDiaria | null }> {
+    const fecha = this.obtenerFechaBogota(new Date());
+    const existente = await this.asistenciaDiariaRepository.findOne({ where: { estudianteId, fecha } });
+
+    if (!existente) {
+      throw new NotFoundException('No hay ningún registro de asistencia de hoy para este estudiante.');
+    }
+    if (existente.origen !== OrigenAsistencia.CORRECCION_MANUAL) {
+      throw new ConflictException(
+        'El registro de hoy viene de una tarjeta NFC real, no de una corrección manual; no se puede deshacer desde aquí.',
+      );
+    }
+    if (!existente.snapshotAntesCorreccion) {
+      throw new ConflictException(
+        'Este registro no tiene un estado anterior guardado (es de antes de que existiera esta función, o ya se deshizo una vez); no se puede deshacer automáticamente.',
+      );
+    }
+
+    // Mismo criterio que TIPOS_PERMITIDOS_PROFESOR en registrarManual: un
+    // profesor solo puede deshacer los tipos que él mismo puede registrar
+    // directamente.
+    const TIPOS_PERMITIDOS_PROFESOR_DESHACER = ['entrada', 'salida', 'evadido', 'encontrado'];
+    if (
+      rolSolicitante === 'profesor' &&
+      existente.ultimoTipoCorreccion &&
+      !TIPOS_PERMITIDOS_PROFESOR_DESHACER.includes(existente.ultimoTipoCorreccion)
+    ) {
+      throw new ForbiddenException('Un profesor solo puede deshacer un registro de entrada, salida o evadido.');
+    }
+
+    const snapshot: SnapshotAsistencia = JSON.parse(existente.snapshotAntesCorreccion);
+
+    if (!snapshot.existia) {
+      // No existía ningún registro antes de esta corrección (ej. la
+      // "entrada" que se está deshaciendo fue la que creó la fila) --
+      // deshacer significa volver a "sin registro hoy", no dejar una fila
+      // con datos inventados.
+      await this.asistenciaDiariaRepository.delete(existente.id);
+      return { eliminado: true, registro: null };
+    }
+
+    existente.estadoId = snapshot.estadoId!;
+    existente.horaEntrada = snapshot.horaEntrada ? new Date(snapshot.horaEntrada) : null;
+    existente.horaSalida = snapshot.horaSalida ? new Date(snapshot.horaSalida) : null;
+    existente.eventoEntradaId = snapshot.eventoEntradaId;
+    existente.eventoSalidaId = snapshot.eventoSalidaId;
+    existente.origen = snapshot.origen ?? OrigenAsistencia.NFC_AUTOMATICO;
+    existente.observacionVerificacion = snapshot.observacionVerificacion;
+    existente.verificadoPorUsuarioId = snapshot.verificadoPorUsuarioId;
+    existente.fechaVerificacion = snapshot.fechaVerificacion ? new Date(snapshot.fechaVerificacion) : null;
+    existente.salidaAnticipada = snapshot.salidaAnticipada;
+    existente.evadidoEscaladoCoordinador = snapshot.evadidoEscaladoCoordinador;
+    // Un solo nivel de deshacer: una vez restaurado, no queda un "anterior
+    // al anterior" -- se limpia para no dejar un botón de "Deshacer" que ya
+    // no tiene a dónde volver.
+    existente.snapshotAntesCorreccion = null;
+    existente.ultimoTipoCorreccion = null;
+
+    const registro = await this.asistenciaDiariaRepository.save(existente);
+    return { eliminado: false, registro };
   }
 
   /**

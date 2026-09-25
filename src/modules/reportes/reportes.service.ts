@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Workbook, Worksheet } from 'exceljs';
+import PDFDocument from 'pdfkit';
 import { AsistenciaDiaria } from '../../config/entities/asistencia/asistencia-diaria.entity';
 import { Estudiante } from '../../config/entities/academico/estudiante.entity';
 import { Matricula } from '../../config/entities/academico/matricula.entity';
@@ -22,6 +23,12 @@ const COLOR_TEAL = 'FF0D9488';
 const COLOR_TEAL_CLARO = 'FFE6FBF8';
 const COLOR_GRIS_CLARO = 'FFF3F4F6';
 const COLOR_BORDE = 'FFD1D5DB';
+
+// (2026-09-25) Además de Excel, los tres informes ahora también se pueden
+// pedir en PDF (dto.formato === 'pdf') -- una sola página con el resumen,
+// sin el detalle día a día (eso se queda como exclusivo de Excel).
+const TIPO_MIME_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const TIPO_MIME_PDF = 'application/pdf';
 
 interface ConteoEstadisticas {
   totalRegistros: number;
@@ -100,7 +107,9 @@ export class ReportesService {
     @InjectRepository(Colegio) private readonly colegioRepository: Repository<Colegio>,
   ) {}
 
-  async generarInformeEstudiante(dto: InformeEstudianteQueryDto): Promise<{ buffer: Buffer; nombreArchivo: string }> {
+  async generarInformeEstudiante(
+    dto: InformeEstudianteQueryDto,
+  ): Promise<{ buffer: Buffer; nombreArchivo: string; mimeType: string }> {
     this.validarRango(dto.fechaInicio, dto.fechaFin);
 
     const estudiante = await this.estudianteRepository.findOne({ where: { id: dto.estudianteId } });
@@ -119,14 +128,30 @@ export class ReportesService {
     for (const registro of registros) acumular(conteo, registro);
 
     const colegio = await this.obtenerColegio();
+    const nombreBase = `informe_${estudiante.nombres}_${estudiante.apellidos}`;
+    const titulo = 'Informe individual de asistencia';
+    const subtitulo = `${estudiante.nombres} ${estudiante.apellidos} — Documento ${estudiante.numeroDocumento}${
+      matricula ? ` — ${matricula.curso.nombre}` : ''
+    }`;
+
+    if (dto.formato === 'pdf') {
+      const buffer = await this.construirPdfResumen({
+        colegio,
+        titulo,
+        subtitulo,
+        fechaInicio: dto.fechaInicio,
+        fechaFin: dto.fechaFin,
+        conteoGeneral: conteo,
+      });
+      return { buffer, nombreArchivo: this.nombreArchivo(nombreBase, dto.fechaInicio, dto.fechaFin, 'pdf'), mimeType: TIPO_MIME_PDF };
+    }
+
     const libro = this.crearLibro();
 
     const hojaResumen = libro.addWorksheet('Resumen');
     let fila = this.escribirEncabezadoInforme(hojaResumen, colegio, {
-      titulo: 'Informe individual de asistencia',
-      subtitulo: `${estudiante.nombres} ${estudiante.apellidos} — Documento ${estudiante.numeroDocumento}${
-        matricula ? ` — ${matricula.curso.nombre}` : ''
-      }`,
+      titulo,
+      subtitulo,
       fechaInicio: dto.fechaInicio,
       fechaFin: dto.fechaFin,
     });
@@ -136,11 +161,16 @@ export class ReportesService {
     const hojaDetalle = libro.addWorksheet('Detalle día a día');
     this.escribirDetalleRegistros(hojaDetalle, registros, { incluirEstudiante: false, incluirCurso: false });
 
-    const nombreArchivo = this.nombreArchivo(`informe_${estudiante.nombres}_${estudiante.apellidos}`, dto.fechaInicio, dto.fechaFin);
-    return { buffer: await this.finalizarLibro(libro), nombreArchivo };
+    return {
+      buffer: await this.finalizarLibro(libro),
+      nombreArchivo: this.nombreArchivo(nombreBase, dto.fechaInicio, dto.fechaFin, 'xlsx'),
+      mimeType: TIPO_MIME_XLSX,
+    };
   }
 
-  async generarInformeCurso(dto: InformeCursoQueryDto): Promise<{ buffer: Buffer; nombreArchivo: string }> {
+  async generarInformeCurso(
+    dto: InformeCursoQueryDto,
+  ): Promise<{ buffer: Buffer; nombreArchivo: string; mimeType: string }> {
     this.validarRango(dto.fechaInicio, dto.fechaFin);
 
     const curso = await this.cursoRepository.findOne({ where: { id: dto.cursoId }, relations: ['profesorDirector'] });
@@ -168,12 +198,34 @@ export class ReportesService {
     }
 
     const colegio = await this.obtenerColegio();
+    const nombreBase = `informe_salon_${curso.nombre}`;
+    const titulo = 'Informe de asistencia por salón';
+    const subtitulo = `${curso.nombre} — Jornada ${curso.jornada} — Director de grupo: ${curso.profesorDirector.nombres} ${curso.profesorDirector.apellidos}`;
+    const filasDesglose = estudiantes.map((estudiante) => ({
+      etiqueta: `${estudiante.nombres} ${estudiante.apellidos}`,
+      referencia: estudiante.numeroDocumento,
+      conteo: conteoPorEstudiante.get(estudiante.id)!,
+    }));
+
+    if (dto.formato === 'pdf') {
+      const buffer = await this.construirPdfResumen({
+        colegio,
+        titulo,
+        subtitulo,
+        fechaInicio: dto.fechaInicio,
+        fechaFin: dto.fechaFin,
+        conteoGeneral: conteoTotal,
+        desglose: { etiquetaColumnaPrincipal: 'Estudiante', etiquetaColumnaReferencia: 'Documento', filas: filasDesglose },
+      });
+      return { buffer, nombreArchivo: this.nombreArchivo(nombreBase, dto.fechaInicio, dto.fechaFin, 'pdf'), mimeType: TIPO_MIME_PDF };
+    }
+
     const libro = this.crearLibro();
 
     const hojaResumen = libro.addWorksheet('Resumen');
     let fila = this.escribirEncabezadoInforme(hojaResumen, colegio, {
-      titulo: 'Informe de asistencia por salón',
-      subtitulo: `${curso.nombre} — Jornada ${curso.jornada} — Director de grupo: ${curso.profesorDirector.nombres} ${curso.profesorDirector.apellidos}`,
+      titulo,
+      subtitulo,
       fechaInicio: dto.fechaInicio,
       fechaFin: dto.fechaFin,
     });
@@ -182,27 +234,22 @@ export class ReportesService {
 
     this.escribirTituloSeccion(hojaResumen, fila, 'Detalle por estudiante');
     fila += 1;
-    this.escribirTablaDesglose(
-      hojaResumen,
-      fila,
-      'Estudiante',
-      estudiantes.map((estudiante) => ({
-        etiqueta: `${estudiante.nombres} ${estudiante.apellidos}`,
-        referencia: estudiante.numeroDocumento,
-        conteo: conteoPorEstudiante.get(estudiante.id)!,
-      })),
-      'Documento',
-    );
+    this.escribirTablaDesglose(hojaResumen, fila, 'Estudiante', filasDesglose, 'Documento');
     this.ajustarAnchoColumnas(hojaResumen, [30, 18, 12, 12, 12, 12, 12, 12, 14]);
 
     const hojaDetalle = libro.addWorksheet('Detalle día a día');
     this.escribirDetalleRegistros(hojaDetalle, registros, { incluirEstudiante: true, incluirCurso: false });
 
-    const nombreArchivo = this.nombreArchivo(`informe_salon_${curso.nombre}`, dto.fechaInicio, dto.fechaFin);
-    return { buffer: await this.finalizarLibro(libro), nombreArchivo };
+    return {
+      buffer: await this.finalizarLibro(libro),
+      nombreArchivo: this.nombreArchivo(nombreBase, dto.fechaInicio, dto.fechaFin, 'xlsx'),
+      mimeType: TIPO_MIME_XLSX,
+    };
   }
 
-  async generarInformeColegio(dto: InformeColegioQueryDto): Promise<{ buffer: Buffer; nombreArchivo: string }> {
+  async generarInformeColegio(
+    dto: InformeColegioQueryDto,
+  ): Promise<{ buffer: Buffer; nombreArchivo: string; mimeType: string }> {
     this.validarRango(dto.fechaInicio, dto.fechaFin);
 
     const anioLectivo = new Date(`${dto.fechaFin}T00:00:00`).getFullYear();
@@ -240,12 +287,34 @@ export class ReportesService {
     }
 
     const colegio = await this.obtenerColegio();
+    const nombreBase = 'informe_colegio';
+    const titulo = 'Informe general de asistencia del colegio';
+    const subtitulo = `Todos los cursos — ${cursos.length} salones, ${todosLosEstudianteIds.length} estudiantes matriculados (año lectivo ${anioLectivo})`;
+    const filasDesglose = cursos.map((curso) => ({
+      etiqueta: curso.nombre,
+      referencia: `${estudianteIdsPorCurso.get(curso.id)?.length ?? 0} estudiantes`,
+      conteo: conteoPorCurso.get(curso.id)!,
+    }));
+
+    if (dto.formato === 'pdf') {
+      const buffer = await this.construirPdfResumen({
+        colegio,
+        titulo,
+        subtitulo,
+        fechaInicio: dto.fechaInicio,
+        fechaFin: dto.fechaFin,
+        conteoGeneral: conteoTotal,
+        desglose: { etiquetaColumnaPrincipal: 'Salón', etiquetaColumnaReferencia: 'Estudiantes', filas: filasDesglose },
+      });
+      return { buffer, nombreArchivo: this.nombreArchivo(nombreBase, dto.fechaInicio, dto.fechaFin, 'pdf'), mimeType: TIPO_MIME_PDF };
+    }
+
     const libro = this.crearLibro();
 
     const hojaResumen = libro.addWorksheet('Resumen');
     let fila = this.escribirEncabezadoInforme(hojaResumen, colegio, {
-      titulo: 'Informe general de asistencia del colegio',
-      subtitulo: `Todos los cursos — ${cursos.length} salones, ${todosLosEstudianteIds.length} estudiantes matriculados (año lectivo ${anioLectivo})`,
+      titulo,
+      subtitulo,
       fechaInicio: dto.fechaInicio,
       fechaFin: dto.fechaFin,
     });
@@ -254,24 +323,17 @@ export class ReportesService {
 
     this.escribirTituloSeccion(hojaResumen, fila, 'Detalle por salón');
     fila += 1;
-    this.escribirTablaDesglose(
-      hojaResumen,
-      fila,
-      'Salón',
-      cursos.map((curso) => ({
-        etiqueta: curso.nombre,
-        referencia: `${estudianteIdsPorCurso.get(curso.id)?.length ?? 0} estudiantes`,
-        conteo: conteoPorCurso.get(curso.id)!,
-      })),
-      'Estudiantes',
-    );
+    this.escribirTablaDesglose(hojaResumen, fila, 'Salón', filasDesglose, 'Estudiantes');
     this.ajustarAnchoColumnas(hojaResumen, [24, 18, 12, 12, 12, 12, 12, 12, 14]);
 
     const hojaDetalle = libro.addWorksheet('Detalle día a día');
     this.escribirDetalleRegistros(hojaDetalle, registros, { incluirEstudiante: true, incluirCurso: true, cursoIdPorEstudianteId, cursos });
 
-    const nombreArchivo = this.nombreArchivo('informe_colegio', dto.fechaInicio, dto.fechaFin);
-    return { buffer: await this.finalizarLibro(libro), nombreArchivo };
+    return {
+      buffer: await this.finalizarLibro(libro),
+      nombreArchivo: this.nombreArchivo(nombreBase, dto.fechaInicio, dto.fechaFin, 'xlsx'),
+      mimeType: TIPO_MIME_XLSX,
+    };
   }
 
   // ---------- Consultas ----------
@@ -319,14 +381,14 @@ export class ReportesService {
     }
   }
 
-  private nombreArchivo(base: string, fechaInicio: string, fechaFin: string): string {
+  private nombreArchivo(base: string, fechaInicio: string, fechaFin: string, extension: 'xlsx' | 'pdf'): string {
     const normalizar = (texto: string) =>
       texto
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '')
         .replace(/[^a-zA-Z0-9]+/g, '_')
         .replace(/^_+|_+$/g, '');
-    return `${normalizar(base)}_${fechaInicio}_a_${fechaFin}.xlsx`;
+    return `${normalizar(base)}_${fechaInicio}_a_${fechaFin}.${extension}`;
   }
 
   // ---------- Construcción del libro de Excel ----------
@@ -540,6 +602,190 @@ export class ReportesService {
   private ajustarAnchoColumnas(hoja: Worksheet, anchos: number[]): void {
     anchos.forEach((ancho, indice) => {
       hoja.getColumn(indice + 1).width = ancho;
+    });
+  }
+
+  // ---------- Construcción del PDF (2026-09-25) ----------
+  //
+  // A diferencia del Excel (que sí incluye el detalle día a día, pensado
+  // como "el informe" completo), el PDF es deliberadamente una sola
+  // página con el resumen -- para imprimir o mandar rápido por WhatsApp/
+  // correo sin abrir Excel. Mismo patrón ya usado en este proyecto para
+  // el PDF de autorización de salida (autorizaciones-salida.service.ts):
+  // pdfkit, sin dependencias de navegador, se arma en memoria como Buffer.
+
+  private construirPdfResumen(opciones: {
+    colegio: Colegio | null;
+    titulo: string;
+    subtitulo: string;
+    fechaInicio: string;
+    fechaFin: string;
+    conteoGeneral: ConteoEstadisticas;
+    desglose?: {
+      etiquetaColumnaPrincipal: string;
+      etiquetaColumnaReferencia: string;
+      filas: { etiqueta: string; referencia: string; conteo: ConteoEstadisticas }[];
+    };
+  }): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      // Con desglose (informe de salón o de colegio) hay hasta 9 columnas —
+      // en vertical no caben con un ancho legible, así que esos dos usan
+      // hoja apaisada; el informe individual (sin desglose) se queda en
+      // vertical, como cualquier hoja de una sola tabla angosta.
+      const apaisado = !!opciones.desglose;
+      const doc = new PDFDocument({ size: 'letter', margin: 40, layout: apaisado ? 'landscape' : 'portrait' });
+      const chunks: Buffer[] = [];
+      doc.on('data', (chunk) => chunks.push(chunk));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      if (opciones.colegio?.nombre) {
+        doc.fontSize(16).font('Helvetica-Bold').fillColor('#000F22').text(opciones.colegio.nombre, { align: 'center' });
+        doc.moveDown(0.2);
+      }
+      doc.fontSize(13).font('Helvetica-Bold').fillColor('#0D9488').text(opciones.titulo, { align: 'center' });
+      doc.moveDown(0.15);
+      doc.fontSize(10).font('Helvetica-Oblique').fillColor('#4B5563').text(opciones.subtitulo, { align: 'center' });
+      doc.moveDown(0.15);
+      doc
+        .fontSize(9)
+        .font('Helvetica')
+        .fillColor('#374151')
+        .text(`Período del informe: ${formatearFechaLarga(opciones.fechaInicio)} al ${formatearFechaLarga(opciones.fechaFin)}`, {
+          align: 'center',
+        });
+      doc
+        .fontSize(8)
+        .font('Helvetica')
+        .fillColor('#9CA3AF')
+        .text(`Generado el ${formatearFechaHoraBogota(new Date())} (hora Colombia)`, { align: 'center' });
+      doc.moveDown(1);
+
+      doc.fontSize(11).font('Helvetica-Bold').fillColor('#000F22').text('Resumen general del período');
+      doc.moveDown(0.3);
+
+      const anchoUtil = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+      const columnasResumen = [
+        { titulo: 'Total', ancho: anchoUtil * 0.16 },
+        { titulo: 'Presente', ancho: anchoUtil * 0.16 },
+        { titulo: 'Llegó tarde', ancho: anchoUtil * 0.16 },
+        { titulo: 'Ausente', ancho: anchoUtil * 0.14 },
+        { titulo: 'Excusado', ancho: anchoUtil * 0.14 },
+        { titulo: 'Evadido', ancho: anchoUtil * 0.12 },
+        { titulo: '% Asistencia', ancho: anchoUtil * 0.12 },
+      ];
+      const filaResumen = [
+        [
+          String(opciones.conteoGeneral.totalRegistros),
+          String(opciones.conteoGeneral.presente),
+          String(opciones.conteoGeneral.tarde),
+          String(opciones.conteoGeneral.ausente),
+          String(opciones.conteoGeneral.excusado),
+          String(opciones.conteoGeneral.evadido),
+          `${porcentajeAsistencia(opciones.conteoGeneral).toFixed(1)}%`,
+        ],
+      ];
+      this.dibujarTablaPdf(doc, columnasResumen, filaResumen);
+
+      if (opciones.desglose && opciones.desglose.filas.length > 0) {
+        doc.moveDown(1);
+        doc
+          .fontSize(11)
+          .font('Helvetica-Bold')
+          .fillColor('#000F22')
+          .text(`Detalle por ${opciones.desglose.etiquetaColumnaPrincipal.toLowerCase()}`);
+        doc.moveDown(0.3);
+
+        const columnasDesglose = [
+          { titulo: opciones.desglose.etiquetaColumnaPrincipal, ancho: anchoUtil * 0.24 },
+          { titulo: opciones.desglose.etiquetaColumnaReferencia, ancho: anchoUtil * 0.16 },
+          { titulo: 'Total', ancho: anchoUtil * 0.1 },
+          { titulo: 'Presente', ancho: anchoUtil * 0.1 },
+          { titulo: 'Tarde', ancho: anchoUtil * 0.1 },
+          { titulo: 'Ausente', ancho: anchoUtil * 0.1 },
+          { titulo: 'Excusado', ancho: anchoUtil * 0.08 },
+          { titulo: 'Evadido', ancho: anchoUtil * 0.06 },
+          { titulo: '% Asist.', ancho: anchoUtil * 0.06 },
+        ];
+        const filasDesglose = opciones.desglose.filas.map((fila) => [
+          fila.etiqueta,
+          fila.referencia,
+          String(fila.conteo.totalRegistros),
+          String(fila.conteo.presente),
+          String(fila.conteo.tarde),
+          String(fila.conteo.ausente),
+          String(fila.conteo.excusado),
+          String(fila.conteo.evadido),
+          `${porcentajeAsistencia(fila.conteo).toFixed(1)}%`,
+        ]);
+        this.dibujarTablaPdf(doc, columnasDesglose, filasDesglose);
+      }
+
+      doc.moveDown(1.5);
+      doc
+        .fontSize(7)
+        .font('Helvetica')
+        .fillColor('#9CA3AF')
+        .text(
+          'Este PDF muestra el resumen del período. Para el detalle día a día de cada registro, descarga el mismo informe en Excel.',
+          { align: 'center' },
+        );
+
+      doc.end();
+    });
+  }
+
+  // Tabla dibujada a mano (pdfkit no trae tablas nativas): encabezado con
+  // fondo oscuro y texto blanco, filas alternadas claras/blancas, y salto
+  // de página con el encabezado repetido si el contenido no cabe en una
+  // sola hoja (relevante para el informe de colegio con muchos salones).
+  private dibujarTablaPdf(
+    doc: InstanceType<typeof PDFDocument>,
+    columnas: { titulo: string; ancho: number }[],
+    filas: string[][],
+  ): void {
+    const xInicio = doc.page.margins.left;
+    const anchoTotal = columnas.reduce((suma, columna) => suma + columna.ancho, 0);
+    const alturaFila = 20;
+
+    const dibujarEncabezado = (): void => {
+      let x = xInicio;
+      const y = doc.y;
+      columnas.forEach((columna) => {
+        doc.rect(x, y, columna.ancho, alturaFila).fill('#000F22');
+        doc
+          .fillColor('#FFFFFF')
+          .fontSize(8)
+          .font('Helvetica-Bold')
+          .text(columna.titulo, x + 4, y + 6, { width: columna.ancho - 8, align: 'center', ellipsis: true });
+        x += columna.ancho;
+      });
+      doc.y = y + alturaFila;
+    };
+
+    dibujarEncabezado();
+
+    filas.forEach((fila, indiceFila) => {
+      if (doc.y + alturaFila > doc.page.height - doc.page.margins.bottom) {
+        doc.addPage();
+        dibujarEncabezado();
+      }
+
+      let x = xInicio;
+      const y = doc.y;
+      if (indiceFila % 2 === 1) {
+        doc.rect(xInicio, y, anchoTotal, alturaFila).fill('#F3F4F6');
+      }
+      fila.forEach((valor, indiceColumna) => {
+        const ancho = columnas[indiceColumna].ancho;
+        doc
+          .fillColor('#111827')
+          .fontSize(8)
+          .font('Helvetica')
+          .text(valor, x + 4, y + 6, { width: ancho - 8, align: indiceColumna === 0 ? 'left' : 'center', ellipsis: true });
+        x += ancho;
+      });
+      doc.y = y + alturaFila;
     });
   }
 }

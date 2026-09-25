@@ -3,6 +3,7 @@ import { ClassSerializerInterceptor, ValidationPipe } from '@nestjs/common';
 import { NestFactory, Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { AppConfig } from './config/configuration';
 import { validateEnv } from './config/env.validation';
@@ -27,6 +28,7 @@ async function bootstrap() {
   const configService = app.get(ConfigService<AppConfig, true>);
 
   app.use(helmet());
+  app.use(cookieParser());
 
   app.enableCors({
     origin: configService.get('corsOrigins', { infer: true }),

@@ -461,6 +461,44 @@ export class AcademicoService {
     return acudienteGuardado;
   }
 
+  /**
+   * (2026-09-25) Vincula un acudiente que YA EXISTE a un estudiante
+   * adicional -- hermanos o sobrinos que comparten el mismo acudiente, sin
+   * duplicar sus datos creando un registro nuevo por cada estudiante (que
+   * era la única forma de hacerlo hasta ahora, ver crearAcudiente).
+   */
+  async vincularAcudienteExistente(acudienteId: string, dto: { estudianteId: string; esContactoNotificacion?: boolean }) {
+    const acudiente = await this.acudienteRepository.findOne({ where: { id: acudienteId } });
+    if (!acudiente) {
+      throw new NotFoundException('El acudiente indicado no existe.');
+    }
+
+    const estudiante = await this.estudianteRepository.findOne({ where: { id: dto.estudianteId } });
+    if (!estudiante) {
+      throw new NotFoundException('El estudiante indicado no existe.');
+    }
+
+    const yaVinculado = await this.estudianteAcudienteRepository.findOne({
+      where: { estudianteId: estudiante.id, acudienteId: acudiente.id },
+    });
+    if (yaVinculado) {
+      throw new ConflictException('Ese acudiente ya está vinculado a ese estudiante.');
+    }
+
+    const vinculo = this.estudianteAcudienteRepository.create({
+      estudianteId: estudiante.id,
+      acudienteId: acudiente.id,
+      esContactoNotificacion: dto.esContactoNotificacion ?? true,
+    });
+    await this.estudianteAcudienteRepository.save(vinculo);
+
+    return {
+      estudianteId: estudiante.id,
+      acudienteId: acudiente.id,
+      esContactoNotificacion: vinculo.esContactoNotificacion,
+    };
+  }
+
   async listarAcudientes(filtros: FiltrarAcudientesDto) {
     const pagina = filtros.pagina ?? 1;
     const limite = filtros.limite ?? 10;
