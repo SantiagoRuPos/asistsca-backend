@@ -118,6 +118,27 @@ class EnvironmentVariables {
   @IsIn(['lax', 'strict', 'none'])
   COOKIE_SAME_SITE!: string;
 
+  // Ver configuration.ts (cookies.authPath) — opcional, por defecto '/auth'.
+  // Solo hace falta ponerlo distinto (p. ej. '/api/auth') cuando la API
+  // queda detrás de un reverse proxy que la expone bajo un prefijo.
+  @IsOptional()
+  @IsString()
+  COOKIE_AUTH_PATH!: string;
+
+  // --- Integraciones (WhatsApp / Telegram) ---
+  // Opcionales a nivel de validación de entorno para no romper el arranque
+  // si todavia no se han configurado -- pero si faltan, esas funciones
+  // especificas (notificaciones WhatsApp, bot de Telegram) no van a
+  // funcionar en tiempo de ejecucion. Ver whatsapp-config.service.ts y
+  // telegram-api.service.ts.
+  @IsOptional()
+  @IsString()
+  WHATSAPP_ENCRYPTION_KEY!: string;
+
+  @IsOptional()
+  @IsString()
+  TELEGRAM_BOT_TOKEN!: string;
+
   // --- Licenciamiento comercial (Fase 1) ---
   // Todas opcionales: si no se completan, configuration.ts usa los valores
   // por defecto (storage/licencia/... y 15+7 días de gracia) para que el

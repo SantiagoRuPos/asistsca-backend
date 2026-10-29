@@ -7,12 +7,16 @@ import { LoginDto } from './dto/login.dto';
 import { LicenciaExenta } from '../licenciamiento/decorators/licencia-exenta.decorator';
 import { AppConfig } from '../../config/configuration';
 
-// Nombre y "path" de la cookie httpOnly que transporta el refresh token.
-// path='/auth' acota la cookie a estas tres rutas (login/refresh/logout) para
-// que el navegador no la reenvíe en cada petición a la API — solo aquí, que
-// es lo único que la necesita.
+// Nombre de la cookie httpOnly que transporta el refresh token. El "path"
+// con el que se acota (login/refresh/logout, para que el navegador no la
+// reenvíe en cada petición a la API) viene de config (`cookies.authPath`,
+// env COOKIE_AUTH_PATH) en vez de ser fijo aquí: por defecto es '/auth'
+// (llamadas directas backend<->frontend, como en el VPS de pruebas actual),
+// pero detrás de un reverse proxy que expone la API bajo un prefijo (p. ej.
+// Nginx canalizando /api/* al backend, ver docker-compose de producción)
+// el navegador solo ve rutas como /api/auth/refresh — con path='/auth' esa
+// cookie nunca se reenviaría. Ahí hay que configurar COOKIE_AUTH_PATH=/api/auth.
 const COOKIE_REFRESH_TOKEN = 'asistsca_refresh_token';
-const COOKIE_PATH = '/auth';
 
 @Controller('auth')
 export class AuthController {
@@ -61,7 +65,7 @@ export class AuthController {
   @LicenciaExenta()
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const refreshTokenRecibido = this.leerCookieRefresh(req);
-    res.clearCookie(COOKIE_REFRESH_TOKEN, { path: COOKIE_PATH });
+    res.clearCookie(COOKIE_REFRESH_TOKEN, { path: this.configService.get('cookies.authPath', { infer: true }) });
     if (!refreshTokenRecibido) {
       return { mensaje: 'Sesión cerrada' };
     }
@@ -83,7 +87,7 @@ export class AuthController {
       httpOnly: true,
       secure: this.configService.get('cookies.secure', { infer: true }),
       sameSite: this.configService.get('cookies.sameSite', { infer: true }),
-      path: COOKIE_PATH,
+      path: this.configService.get('cookies.authPath', { infer: true }),
       maxAge: this.configService.get('cookies.refreshMaxAgeMs', { infer: true }),
     });
   }

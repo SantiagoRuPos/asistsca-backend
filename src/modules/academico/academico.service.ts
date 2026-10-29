@@ -528,6 +528,8 @@ export class AcademicoService {
       telefonoWhatsapp: acudiente.telefonoWhatsapp,
       email: acudiente.email,
       numeroDocumento: acudiente.numeroDocumento,
+      autorizacionTratamientoDatos: acudiente.autorizacionTratamientoDatos,
+      fechaAutorizacionTratamiento: acudiente.fechaAutorizacionTratamiento,
       estudiantes: (acudiente.estudiantes ?? []).map((vinculo) => ({
         id: vinculo.estudiante.id,
         nombres: vinculo.estudiante.nombres,
@@ -542,6 +544,30 @@ export class AcademicoService {
       pagina,
       limite,
       totalPaginas: Math.max(1, Math.ceil(total / limite)),
+    };
+  }
+
+  /**
+   * (2026-10-15) Registra o revoca la autorizacion de tratamiento de datos
+   * personales (Ley 1581 de 2012 / Habeas Data) que el acudiente otorga en
+   * representacion del menor. El colegio es el responsable del tratamiento
+   * y es quien debe recoger el consentimiento real -- este metodo solo deja
+   * la constancia (y la fecha) en el sistema para poder demostrarla.
+   */
+  async actualizarAutorizacionDatos(id: string, autorizado: boolean) {
+    const acudiente = await this.acudienteRepository.findOne({ where: { id } });
+    if (!acudiente) {
+      throw new NotFoundException('El acudiente indicado no existe.');
+    }
+
+    acudiente.autorizacionTratamientoDatos = autorizado;
+    acudiente.fechaAutorizacionTratamiento = autorizado ? new Date() : null;
+    await this.acudienteRepository.save(acudiente);
+
+    return {
+      id: acudiente.id,
+      autorizacionTratamientoDatos: acudiente.autorizacionTratamientoDatos,
+      fechaAutorizacionTratamiento: acudiente.fechaAutorizacionTratamiento,
     };
   }
 

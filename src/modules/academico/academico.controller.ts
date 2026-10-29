@@ -9,6 +9,7 @@ import { CrearEstudianteDto } from './dto/crear-estudiante.dto';
 import { CrearAcudienteDto } from './dto/crear-acudiente.dto';
 import { FiltrarAcudientesDto } from './dto/filtrar-acudientes.dto';
 import { ActualizarAcudienteDto } from './dto/actualizar-acudiente.dto';
+import { ActualizarAutorizacionDatosDto } from './dto/actualizar-autorizacion-datos.dto';
 import { ActualizarContactoAcudienteDto } from './dto/actualizar-contacto-acudiente.dto';
 import { VincularAcudienteExistenteDto } from './dto/vincular-acudiente-existente.dto';
 import { MatricularEstudianteDto } from './dto/matricular-estudiante.dto';
@@ -140,6 +141,20 @@ export class AcademicoController {
   @Roles(...ROLES_GESTION)
   actualizarAcudiente(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ActualizarAcudienteDto) {
     return this.academicoService.actualizarAcudiente(id, dto);
+  }
+
+  // (2026-10-15) Deja constancia de la autorizacion de tratamiento de datos
+  // personales (Ley 1581 de 2012 / Habeas Data) que el acudiente otorga en
+  // representacion del menor. El consentimiento real lo recoge el colegio
+  // (responsable del tratamiento); este endpoint solo registra el hecho.
+  @Patch('acudientes/:id/autorizacion-datos')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ROLES_GESTION)
+  actualizarAutorizacionDatos(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ActualizarAutorizacionDatosDto,
+  ) {
+    return this.academicoService.actualizarAutorizacionDatos(id, dto.autorizado);
   }
 
   // (2026-09-25) Vincula un acudiente ya existente a un estudiante

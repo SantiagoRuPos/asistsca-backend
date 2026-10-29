@@ -55,6 +55,13 @@ export interface AppConfig {
     secure: boolean;
     sameSite: 'lax' | 'strict' | 'none';
     refreshMaxAgeMs: number;
+    // Ver auth.controller.ts: a qué "path" se acota la cookie del refresh
+    // token. Por defecto '/auth' (llamada directa backend<->frontend). Si
+    // un reverse proxy expone la API bajo un prefijo (p. ej. Nginx
+    // canalizando /api/* -> backend, ver docker-compose de producción),
+    // el navegador solo ve rutas como /api/auth/refresh y hay que poner
+    // COOKIE_AUTH_PATH=/api/auth para que la cookie se siga enviando.
+    authPath: string;
   };
   licencia: {
     // Rutas relativas a process.cwd() (raíz del backend en ejecución).
@@ -134,6 +141,7 @@ export default (): AppConfig => ({
       : process.env.NODE_ENV === 'production',
     sameSite: (process.env.COOKIE_SAME_SITE as 'lax' | 'strict' | 'none' | undefined) ?? 'lax',
     refreshMaxAgeMs: parsearDuracionMs(process.env.JWT_REFRESH_EXPIRES_IN ?? '7d'),
+    authPath: process.env.COOKIE_AUTH_PATH ?? '/auth',
   },
 
   licencia: {
