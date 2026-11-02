@@ -42,6 +42,13 @@ export interface AppConfig {
     name: string;
   };
   corsOrigins: string[];
+  // Primer admin creado automaticamente al arrancar si no existe aun
+  // ningun usuario con ese correo (ver admin-seeder.service.ts) -- null
+  // si no se configuraron, y entonces no se crea nada solo.
+  adminBootstrap: {
+    email: string | null;
+    password: string | null;
+  };
   cookies: {
     // El refresh token viaja en una cookie httpOnly (no accesible desde JS,
     // ver auth.controller.ts) en vez de en el cuerpo de la respuesta/localStorage.
@@ -134,6 +141,11 @@ export default (): AppConfig => ({
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean),
+
+  adminBootstrap: {
+    email: process.env.ADMIN_EMAIL || null,
+    password: process.env.ADMIN_PASSWORD || null,
+  },
 
   cookies: {
     secure: process.env.COOKIE_SECURE
