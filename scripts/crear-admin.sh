@@ -1,21 +1,17 @@
 #!/bin/bash
-# Script TEMPORAL para crear el primer usuario admin en un despliegue
-# nuevo -- el sistema no trae ningun admin de fabrica ni endpoint publico
-# para crear el primero (crear usuarios ya requiere estar logueado), asi
-# que esto inserta directo en la base de datos una sola vez.
+# Respaldo manual para crear el primer admin -- normalmente NO hace falta
+# correr esto: si pones ADMIN_EMAIL y ADMIN_PASSWORD en el .env, el backend
+# crea ese usuario solo al arrancar (ver src/config/database/admin-seeder.service.ts).
+# Usa este script solo si prefieres no poner esas variables en el .env, o si
+# necesitas crear un admin adicional por SQL directo.
 #
-# Uso: correr desde la carpeta ~/asistsca (donde esta docker-compose.yml),
-# con los contenedores ya levantados (backend y postgres healthy):
-#
-#   bash asistsca-backend/scripts/crear-admin-temporal.sh
-#
-# Es un parche manual -- una vez que confirmes que el login funciona,
-# crea tu usuario real desde el panel (logueado como admin) y borra este
-# usuario de prueba. Este archivo tambien se puede borrar del repo
-# despues (ver aviso al usuario en el chat de Claude).
+# Uso: desde ~/asistsca (o cualquier subcarpeta del repo), con los
+# contenedores ya levantados (backend y postgres healthy):
+#   bash asistsca-backend/scripts/crear-admin.sh
 
 set -e
-cd ~/asistsca
+RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$RAIZ"
 
 ADMIN_EMAIL='admin@asistsca.local'
 ADMIN_PASSWORD='CambiaEsta123!'
@@ -49,6 +45,5 @@ echo "Usuario admin listo para probar:"
 echo "  Email:    $ADMIN_EMAIL"
 echo "  Password: $ADMIN_PASSWORD"
 echo "=================================================="
-echo "Es un usuario de PRUEBA del despliegue -- cambia la contraseña o"
-echo "crea tu usuario real y borra este desde el panel una vez que"
-echo "confirmes que todo funciona."
+echo "Cambia la contraseña o crea tu usuario real desde el panel y borra"
+echo "este una vez que confirmes que todo funciona."
