@@ -6,6 +6,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import configuration, { AppConfig } from './config/configuration';
 import { validateEnv } from './config/env.validation';
 import { DatabaseModule } from './config/database/database.module';
+import { AdminSeederModule } from './config/database/admin-seeder.module';
 import { ColegioModule } from './modules/colegio/colegio.module';
 import { CatalogosModule } from './modules/catalogos/catalogos.module';
 import { AcademicoModule } from './modules/academico/academico.module';
@@ -29,6 +30,7 @@ import { LicenciaGuard } from './modules/licenciamiento/guards/licencia.guard';
       validate: validateEnv,
     }),
     DatabaseModule,
+    AdminSeederModule,
     ScheduleModule.forRoot(),
     ThrottlerModule.forRootAsync({
       inject: [ConfigService],

@@ -107,6 +107,20 @@ class EnvironmentVariables {
   @IsString()
   BRAND_NAME!: string;
 
+  // --- Primer admin automatico ---
+  // Opcionales: si ambos faltan, no se crea ningun usuario automaticamente
+  // (ver admin-seeder.service.ts) y hay que crear el primer admin a mano
+  // (scripts/crear-admin.sh). Si se completan, se crea UNA sola vez --
+  // nunca pisa la contraseña de un usuario que ya exista con ese correo,
+  // asi que es seguro dejarlas puestas en el .env permanentemente.
+  @IsOptional()
+  @IsString()
+  ADMIN_EMAIL!: string;
+
+  @IsOptional()
+  @MinLength(8, { message: 'ADMIN_PASSWORD debe tener al menos 8 caracteres' })
+  ADMIN_PASSWORD!: string;
+
   // --- Cookie del refresh token (httpOnly) ---
   // Opcionales: si no se completan, configuration.ts decide un valor por
   // defecto seguro (secure=true solo en producción, sameSite='lax').
