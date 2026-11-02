@@ -8,23 +8,37 @@ import axios from 'axios';
  * etc.) — a propósito, para que tanto TelegramBotModule (conversación con
  * el bot) como AsistenciaModule (notificaciones automáticas de "evadido")
  * puedan importarlo sin crear una dependencia circular entre ellos.
+ *
+ * TELEGRAM_BOT_TOKEN es opcional (ver DEPLOYMENT.md): si no está
+ * configurado, el servicio no debe tumbar el arranque de toda la
+ * aplicación -- simplemente queda inactivo y cada método se vuelve un
+ * no-op con una advertencia en el log, igual que ya se hace con SMTP.
  */
 @Injectable()
 export class TelegramApiService {
   private readonly logger = new Logger(TelegramApiService.name);
-  private readonly baseUrl: string;
+  private readonly baseUrl: string | null;
 
   constructor(private readonly configService: ConfigService) {
     const token = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
 
     if (!token) {
-      throw new Error('TELEGRAM_BOT_TOKEN no está configurado');
+      this.logger.warn(
+        'TELEGRAM_BOT_TOKEN no está configurado -- el bot de Telegram y las notificaciones (alertas de login, escalamiento de evadidos) quedan inactivos.',
+      );
+      this.baseUrl = null;
+      return;
     }
 
     this.baseUrl = `https://api.telegram.org/bot${token}`;
   }
 
   async enviarMensaje(chatId: number | string, mensaje: string, replyMarkup?: Record<string, unknown>) {
+    if (!this.baseUrl) {
+      this.logger.warn(`Telegram no configurado -- no se envió el mensaje al chat ${chatId}`);
+      return;
+    }
+
     try {
       await axios.post(`${this.baseUrl}/sendMessage`, {
         chat_id: chatId,
@@ -50,6 +64,10 @@ export class TelegramApiService {
    * del webhook.
    */
   async responderCallback(callbackQueryId: string, texto?: string, mostrarAlerta = false) {
+    if (!this.baseUrl) {
+      return;
+    }
+
     try {
       await axios.post(`${this.baseUrl}/answerCallbackQuery`, {
         callback_query_id: callbackQueryId,
@@ -70,6 +88,10 @@ export class TelegramApiService {
    * la notificación al coordinador.
    */
   async quitarBotones(chatId: number | string, messageId: number) {
+    if (!this.baseUrl) {
+      return;
+    }
+
     try {
       await axios.post(`${this.baseUrl}/editMessageReplyMarkup`, {
         chat_id: chatId,
